@@ -121,10 +121,10 @@ const REASON = { sexual:'色情裸露', minor:'涉及未成年', me_private:'这
 const FAST = new Set(['me_private'])   // 私密影像 48 小时;其余 24 小时
 
 const TABS = [
-  ['review', '待审'], ['reports', '举报'], ['spots', '机位'], ['cities', '城市'],
+  ['quick', '＋ 快速添加'], ['review', '待审'], ['reports', '举报'], ['spots', '机位'], ['cities', '城市'],
   ['takedown', '下架申请'], ['config', '开关'], ['log', '操作日志'], ['usage', '用量'],
 ]
-let tab = 'review'
+let tab = 'quick'
 
 async function admin(action, body = {}) {
   const { data, error } = await sb.functions.invoke('spots-admin', { body: { action, ...body } })
@@ -205,7 +205,7 @@ async function renderTabs() {
 
 async function render() {
   $('#list').innerHTML = '<div class="empty">加载中…</div>'
-  try { await ({ review, reports, spots, cities, takedown, config, log, usage })[tab]() }
+  try { await ({ quick, review, reports, spots, cities, takedown, config, log, usage })[tab]() }
   catch (e) { $('#list').innerHTML = `<div class="empty">出错:${esc(e.message)}</div>` }
 }
 async function act(fn, ok) { try { await fn(); toast(ok); await renderTabs(); render() } catch (e) { toast('失败:' + e.message) } }
@@ -214,6 +214,109 @@ const spotName = async ids => {
   if (!ids.length) return {}
   const { data } = await sb.from('spots').select('id,name,name_zh').in('id', [...new Set(ids)])
   return Object.fromEntries((data || []).map(s => [s.id, s.name_zh || s.name]))
+}
+
+// ── 快速添加:拍照 → 起个名字 → 发布。其余全自动,不急的信息以后在「机位」里补 ─────────────
+let quickFix = null
+async function quick() {
+  quickFix = null
+  $('#list').innerHTML = `
+    <div class="card" style="display:block;max-width:560px">
+      <div class="t" style="font-size:17px">① 拍照或选照片</div>
+      <input type="file" id="qPick" accept="image/*" multiple style="margin:10px 0">
+      <div class="sub" id="qPhotos">可以一次选多张。</div>
+      <div class="t" style="font-size:17px;margin-top:18px">② 起个名字</div>
+      <input id="qName" placeholder="比如:国贸天桥北口 / Battery Spencer" style="width:100%;padding:11px 12px;margin:8px 0;border-radius:8px;border:1px solid var(--line);background:#111;color:#fff;font-size:16px">
+      <div class="sub" id="qLoc">📍 定位中…(站在拍照的位置上)</div>
+      <div class="t" style="font-size:17px;margin-top:18px">③ 发布</div>
+      <div class="acts" style="flex-direction:column;align-items:stretch">
+        <button class="p" id="qOk" style="padding:13px;font-size:16px">发布(这里安全)</button>
+        <button class="bad" id="qCaution" style="padding:13px;font-size:16px">发布(要注意安全:崖边、水边、车流旁…)</button>
+      </div>
+      <div class="sub" id="qMsg" style="margin-top:10px"></div>
+      <div id="upq" style="margin-top:8px"></div>
+      <div class="sub" style="margin-top:14px">半径 50 米,城市自动归。拍摄提示、最佳时段这些以后在「机位」里补。<br>
+        栏杆外、无护栏崖边、水里、铁轨车道、私宅这类地方:别建。</div>
+    </div>`
+  let files = [], photoFix = null
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(p => {
+      quickFix = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }
+      if (!photoFix) $('#qLoc').textContent = `📍 已定位(误差约 ${Math.round(p.coords.accuracy)} 米)${p.coords.accuracy > 50 ? ' —— 偏大,到开阔处刷新一下页面' : ''}`
+    }, err => { if (!photoFix) $('#qLoc').textContent = '📍 拿不到这台设备的位置(' + err.message + ')—— 选一张带 GPS 的照片也行' },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 })
+  } else { $('#qLoc').textContent = '📍 这个浏览器拿不到位置 —— 选一张带 GPS 的照片也行' }
+  $('#qPick').onchange = async e => {
+    files = [...e.target.files]
+    $('#qPhotos').textContent = `已选 ${files.length} 张`
+    for (const f of files) {
+      const m = await readExif(f)
+      if (m.lat != null) { photoFix = m; $('#qLoc').textContent = `📍 用照片「${f.name}」里的位置`; break }
+    }
+  }
+  const go = async (safety) => {
+    const name = $('#qName').value.trim()
+    if (!files.length) { toast('先拍照或选照片'); return }
+    if (!name) { toast('起个名字'); return }
+    const fix = photoFix || quickFix
+    if (!fix) { toast('还没有位置:等定位,或选一张带 GPS 的照片'); return }
+    let note = null
+    if (safety === 'caution') {
+      note = prompt('一句安全提醒(比如:崖边没有护栏,别越过矮墙)')
+      if (!note) return
+    }
+    $('#qOk').disabled = $('#qCaution').disabled = true
+    try {
+      $('#qMsg').textContent = '找城市…'
+      const city = await cityFor(fix.lat, fix.lng)
+      $('#qMsg').textContent = '建机位…'
+      const zh = /[\u4e00-\u9fff]/.test(name)
+      const row = {
+        name, name_zh: zh ? name : null, lat: +fix.lat.toFixed(6), lng: +fix.lng.toFixed(6),
+        heading_deg: photoFix?.heading != null ? Math.round(photoFix.heading) % 360 : null,
+        radius_m: 50, safety, safety_note: note, safety_note_zh: note && /[\u4e00-\u9fff]/.test(note) ? note : null,
+        city_code: city, status: 'published', updated_at: new Date().toISOString(),
+      }
+      const { data, error } = await sb.from('spots').insert(row).select()
+      if (error) throw error
+      await uploadPhotos(data[0].id, files, 0)
+      try { await admin('rebuild') } catch {}
+      $('#qMsg').innerHTML = `<b style="color:var(--green)">✓ 已发布「${esc(name)}」</b> —— 用户 1 公里内会看到「附近有机位」,走到 50 米内照片自动滑出。最晚 1 小时推到用户手机(打开打卡板块马上刷新)。`
+      files = []; $('#qPick').value = ''; $('#qName').value = ''; $('#qPhotos').textContent = '可以接着加下一个。'
+    } catch (e) {
+      $('#qMsg').textContent = '没成功:' + (e.message || e)
+    } finally {
+      $('#qOk').disabled = $('#qCaution').disabled = false
+    }
+  }
+  $('#qOk').onclick = () => go('ok')
+  $('#qCaution').onclick = () => go('caution')
+}
+
+// 机位归哪座城:50 公里内已有的城直接用;没有就按位置查城市名(OpenStreetMap,只发机位坐标)并新建
+async function cityFor(lat, lng) {
+  const { data: cs } = await sb.from('cities').select('code,lat,lng')
+  const R = 6371, rad = d => d * Math.PI / 180
+  const km = c => 2 * R * Math.asin(Math.sqrt(Math.sin(rad(c.lat - lat) / 2) ** 2 +
+    Math.cos(rad(lat)) * Math.cos(rad(c.lat)) * Math.sin(rad(c.lng - lng) / 2) ** 2))
+  const near = (cs || []).filter(c => c.lat != null).map(c => [c, km(c)]).sort((a, b) => a[1] - b[1])[0]
+  if (near && near[1] <= 50) return near[0].code
+  const q = l => fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&lat=${lat}&lon=${lng}&accept-language=${l}`).then(r => r.json())
+  let en = null, zh = null
+  try { [en, zh] = await Promise.all([q('en'), q('zh-CN')]) } catch {}
+  const pick = j => j?.address && String(j.address.city || j.address.town || j.address.county || j.address.state || '').split(';')[0] || null
+  let name = pick(en), nameZh = pick(zh)
+  let country = (en?.address?.country_code || '').toUpperCase()
+  if (!name || !country) {
+    name = prompt('没查到城市名,手动填一个(英文,比如 Beijing)')
+    if (!name) throw new Error('需要城市名')
+    country = (prompt('国家代码(中国 CN、美国 US、韩国 KR、日本 JP)', 'US') || 'US').toUpperCase()
+  }
+  let code = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]/g, '').slice(0, 12) || 'city'
+  if ((cs || []).some(c => c.code === code)) code = code + Math.floor(Math.random() * 90 + 10)
+  const { error } = await sb.from('cities').insert({ code, name, name_zh: nameZh || null, country, lat: +lat.toFixed(4), lng: +lng.toFixed(4) })
+  if (error) throw error
+  return code
 }
 
 // ── 待审:用户照片 100% 人工过目 ─────────────────────────────────────────
