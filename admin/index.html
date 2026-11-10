@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kaleap 打卡管理台</title>
+<!-- 连接配置:tools/admin_config.sh 从 tools/.env.local 生成(不进仓库)。连的是 app 用的那个 EU 库。 -->
+<script src="config.js"></script>
+<style>
+  :root { --amber:#FFB300; --bg:#0e0e10; --card:#1b1b1e; --line:#2a2a2e; --muted:#8a8a90; --red:#FF5E6C; --green:#8fd15b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:#fff; font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; }
+  header { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; }
+  .who { color:var(--muted); font-size:12px; margin-left:auto; }
+  button, select, input, textarea { font:inherit; }
+  button { cursor:pointer; border:none; border-radius:8px; padding:7px 11px; background:#26262b; color:#fff; }
+  button.p { background:var(--amber); color:#000; font-weight:700; }
+  button.ok { background:#26331f; color:var(--green); }
+  button.bad { background:#3a2228; color:var(--red); }
+  button.danger { background:var(--red); color:#fff; }
+  .tabs { display:flex; gap:6px; padding:10px 16px 0; flex-wrap:wrap; }
+  .tab { background:var(--card); color:var(--muted); border:1px solid var(--line); }
+  .tab.on { background:var(--amber); color:#000; border-color:var(--amber); font-weight:700; }
+  .tab .n { display:inline-block; min-width:18px; padding:0 5px; border-radius:9px; background:var(--red); color:#fff; font-size:11px; margin-left:4px; }
+  main { padding:14px 16px 80px; max-width:980px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:12px; display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; }
+  .card .img { width:180px; height:240px; border-radius:8px; background:#000; flex:none; overflow:hidden; position:relative; cursor:pointer; }
+  .card .img img { width:100%; height:100%; object-fit:cover; }
+  .card .img.blur img { filter:blur(22px); }
+  .card .img.blur::after { content:'可能不适,点一下看'; position:absolute; inset:auto 0 8px; text-align:center; font-size:12px; color:#fff; }
+  .card .body { flex:1; min-width:220px; }
+  .t { font-weight:600; }
+  .sub { color:var(--muted); font-size:13px; margin-top:2px; }
+  .badge { display:inline-block; font-size:12px; padding:2px 8px; border-radius:20px; margin:4px 6px 0 0; background:#26262b; color:var(--muted); }
+  .b-red { background:rgba(255,94,108,.18); color:var(--red); }
+  .b-amb { background:rgba(255,179,0,.18); color:var(--amber); }
+  .b-grn { background:rgba(143,209,91,.15); color:var(--green); }
+  .acts { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .empty { color:var(--muted); text-align:center; padding:40px 0; }
+  .err { color:var(--red); font-size:13px; min-height:18px; }
+  .hidden { display:none !important; }
+  #login { max-width:340px; margin:14vh auto; padding:24px; }
+  #login input { width:100%; padding:11px 12px; margin:8px 0; border-radius:8px; border:1px solid var(--line); background:var(--card); color:#fff; }
+  #login button { width:100%; margin-top:8px; padding:11px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; }
+  .ph { background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; font-size:12px; }
+  .ph img { width:100%; aspect-ratio:3/4; object-fit:cover; display:block; background:#000; }
+  .ph .m { padding:6px; display:flex; flex-direction:column; gap:4px; }
+  .ph .row { display:flex; gap:4px; flex-wrap:wrap; }
+  .ph button { padding:3px 7px; font-size:12px; }
+  form.ed { display:grid; grid-template-columns:120px 1fr; gap:8px 10px; align-items:center; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  form.ed label { color:var(--muted); font-size:13px; }
+  form.ed input, form.ed select, form.ed textarea { width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:#111; color:#fff; }
+  form.ed textarea { min-height:52px; }
+  .need { color:var(--red); }
+  .tbl { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .tbl th, .tbl td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--line); font-size:13px; vertical-align:top; }
+  .tbl th { color:var(--muted); font-weight:600; }
+  .mono { font-family:ui-monospace,monospace; font-size:12px; }
+  .muted { color:var(--muted); }
+  .bar { display:flex; gap:8px; align-items:center; margin:0 0 12px; flex-wrap:wrap; }
+  .toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:#2b2b30; padding:10px 16px; border-radius:10px; font-size:14px; z-index:9; }
+  @media (max-width:600px) { form.ed { grid-template-columns:1fr; } .card .img { width:100%; height:300px; } }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>Kaleap 打卡管理台</h1>
+  <p class="muted" style="font-size:13px">填编辑账号的邮箱,点「发登录链接」,去邮箱点链接就进来了,不用密码。</p>
+  <input id="email" type="email" placeholder="邮箱" autocomplete="username">
+  <button class="p" id="linkBtn" style="width:100%;margin-top:4px;padding:11px">发登录链接到邮箱</button>
+  <p class="muted" style="font-size:12px;margin:14px 0 4px">或者用密码登录:</p>
+  <input id="pw" type="password" placeholder="密码" autocomplete="current-password">
+  <div class="err" id="loginErr"></div>
+  <button id="loginBtn">用密码登录</button>
+  <p style="margin-top:14px;font-size:13px"><a href="#" id="forgot" style="color:var(--amber)">忘记密码 / 第一次设密码</a>
+    <span class="muted">—— 填上邮箱再点,会收到一封设密码的邮件,点邮件里的链接回到这一页设新密码</span></p>
+</div>
+
+<div id="setpw" class="hidden" style="max-width:340px;margin:14vh auto;padding:24px">
+  <h1>设新密码</h1>
+  <p class="muted" style="font-size:13px">至少 10 位。这个密码只有你知道,我们这边看不到。</p>
+  <input id="pw1" type="password" placeholder="新密码" autocomplete="new-password" style="width:100%;padding:11px 12px;margin:8px 0;border-radius:8px;border:1px solid var(--line);background:var(--card);color:#fff">
+  <input id="pw2" type="password" placeholder="再输一次" autocomplete="new-password" style="width:100%;padding:11px 12px;margin:8px 0;border-radius:8px;border:1px solid var(--line);background:var(--card);color:#fff">
+  <div class="err" id="pwErr"></div>
+  <button class="p" id="pwBtn" style="width:100%;margin-top:8px;padding:11px">保存新密码并进入</button>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>Kaleap 打卡管理台</h1>
+    <button id="rebuild" title="审核、下架时会自动重建;这里手动再来一次">重建清单</button>
+    <span class="who" id="who"></span>
+    <button id="logout">退出</button>
+  </header>
+  <div class="tabs" id="tabs"></div>
+  <main id="list"><div class="empty">加载中…</div></main>
+</div>
+
+<script type="module">
+// 钉死版本(不用 @2 这种浮动标签)
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm'
+
+const CFG = window.KALEAP_ADMIN
+if (!CFG || !CFG.url || !CFG.key) {
+  document.body.innerHTML = '<p style="padding:40px;color:#FF5E6C">缺 admin/config.js —— 先在仓库里跑 <code>bash tools/admin_config.sh</code></p>'
+  throw new Error('no config')
+}
+const sb = createClient(CFG.url, CFG.key)
+const PUB = `${CFG.url}/storage/v1/object/public/photos-public/`
+const $ = s => document.querySelector(s)
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]))
+const ago = t => { const h = (Date.now() - new Date(t)) / 36e5; return h < 1 ? `${Math.round(h*60)} 分钟前` : h < 48 ? `${Math.round(h)} 小时前` : `${Math.round(h/24)} 天前` }
+const toast = m => { const d = document.createElement('div'); d.className = 'toast'; d.textContent = m; document.body.append(d); setTimeout(() => d.remove(), 2600) }
+
+const REJECT = { wrong_spot:'位置对不上', blurry:'太糊或太暗', child:'有能认出的孩子', policy:'不符合社区规则' }
+const REASON = { sexual:'色情裸露', minor:'涉及未成年', me_private:'这是我 / 私密影像', violence:'暴力血腥', harassment:'骚扰冒犯',
+  copyright:'版权', spam:'垃圾广告', wrong_spot:'不是这个机位', unsafe_spot:'危险拍法', other:'其他' }
+const FAST = new Set(['me_private'])   // 私密影像 48 小时;其余 24 小时
+
+const TABS = [
+  ['review', '待审'], ['reports', '举报'], ['spots', '机位'], ['cities', '城市'],
+  ['takedown', '下架申请'], ['config', '开关'], ['log', '操作日志'], ['usage', '用量'],
+]
+let tab = 'review'
+
+async function admin(action, body = {}) {
+  const { data, error } = await sb.functions.invoke('spots-admin', { body: { action, ...body } })
+  if (error) { let m = error.message; try { m = (await error.context.json()).error || m } catch {} ; throw new Error(m) }
+  return data
+}
+async function signed(bucket, path) {
+  const { data } = await sb.storage.from(bucket).createSignedUrl(path, 600)
+  return data?.signedUrl || ''
+}
+
+// ── 登录 ──────────────────────────────────────────────────────────────
+$('#loginBtn').onclick = async () => {
+  $('#loginErr').textContent = ''
+  const { error } = await sb.auth.signInWithPassword({ email: $('#email').value.trim(), password: $('#pw').value })
+  if (error) { $('#loginErr').textContent = '登录失败:' + error.message; return }
+  boot()
+}
+$('#logout').onclick = async () => { await sb.auth.signOut(); location.reload() }
+// 邮件登录链接:不用密码。shouldCreateUser:false —— 只对已有账号发,别人填自己的邮箱也建不了号;
+// 有号但不是编辑,boot() 里 is_admin 那一关照样挡住。
+$('#linkBtn').onclick = async () => {
+  const email = $('#email').value.trim()
+  if (!email) { $('#loginErr').textContent = '先填邮箱'; return }
+  $('#loginErr').textContent = '发送中…'
+  const { error } = await sb.auth.signInWithOtp({
+    email, options: { shouldCreateUser: false, emailRedirectTo: location.origin + location.pathname },
+  })
+  $('#loginErr').textContent = error ? '没发出去:' + error.message : '已发,去邮箱点「Log In」链接(1 小时内有效)。在哪台设备点,就在哪台登录。'
+}
+// 点邮件链接回来:地址栏里带着登录凭证,supabase-js 自己读进来 → 进后台
+sb.auth.onAuthStateChange(ev => {
+  if (ev === 'SIGNED_IN' && !$('#login').classList.contains('hidden')) {
+    history.replaceState(null, '', location.pathname); boot()
+  }
+})
+// 忘记密码:发一封重设邮件,链接回到这一页(要在 Supabase → Authentication → URL Configuration 的 Redirect URLs 里放行这个地址)
+$('#forgot').onclick = async e => {
+  e.preventDefault()
+  const email = $('#email').value.trim()
+  if (!email) { $('#loginErr').textContent = '先在上面填邮箱'; return }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname })
+  $('#loginErr').textContent = error ? '没发出去:' + error.message : '已发邮件,去邮箱点链接(几分钟内有效)'
+}
+sb.auth.onAuthStateChange(ev => {
+  if (ev === 'PASSWORD_RECOVERY') { $('#login').classList.add('hidden'); $('#setpw').classList.remove('hidden') }
+})
+$('#pwBtn').onclick = async () => {
+  const a = $('#pw1').value, b = $('#pw2').value
+  if (a.length < 10) { $('#pwErr').textContent = '至少 10 位'; return }
+  if (a !== b) { $('#pwErr').textContent = '两次不一样'; return }
+  const { error } = await sb.auth.updateUser({ password: a })
+  if (error) { $('#pwErr').textContent = '没改成:' + error.message; return }
+  $('#setpw').classList.add('hidden'); history.replaceState(null, '', location.pathname); boot()
+}
+$('#rebuild').onclick = async () => { try { const r = await admin('rebuild'); toast(`清单已重建:${(r.countries||[]).join(', ') || '还没有发布的机位'}`) } catch (e) { toast('失败:' + e.message) } }
+
+async function boot() {
+  const { data: { session } } = await sb.auth.getSession()
+  if (!session) return
+  const { data: isAdmin } = await sb.rpc('is_admin')
+  if (!isAdmin) { $('#loginErr').textContent = '这个账号不在 admins 表里'; await sb.auth.signOut(); return }
+  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden')
+  $('#who').textContent = session.user.email
+  await renderTabs(); render()
+}
+
+async function renderTabs() {
+  const [{ count: nr }, { count: nrep }] = await Promise.all([
+    sb.from('photos').select('id', { count: 'exact', head: true }).eq('status', 'pending_review'),
+    sb.from('reports').select('id', { count: 'exact', head: true }).eq('state', 'open'),
+  ])
+  const n = { review: nr, reports: nrep }
+  $('#tabs').innerHTML = TABS.map(([k, l]) =>
+    `<button class="tab ${k === tab ? 'on' : ''}" data-t="${k}">${l}${n[k] ? `<span class="n">${n[k]}</span>` : ''}</button>`).join('')
+  $('#tabs').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.t; editing = null; renderTabs(); render() })
+}
+
+async function render() {
+  $('#list').innerHTML = '<div class="empty">加载中…</div>'
+  try { await ({ review, reports, spots, cities, takedown, config, log, usage })[tab]() }
+  catch (e) { $('#list').innerHTML = `<div class="empty">出错:${esc(e.message)}</div>` }
+}
+async function act(fn, ok) { try { await fn(); toast(ok); await renderTabs(); render() } catch (e) { toast('失败:' + e.message) } }
+
+const spotName = async ids => {
+  if (!ids.length) return {}
+  const { data } = await sb.from('spots').select('id,name,name_zh').in('id', [...new Set(ids)])
+  return Object.fromEntries((data || []).map(s => [s.id, s.name_zh || s.name]))
+}
+
+// ── 待审:用户照片 100% 人工过目 ─────────────────────────────────────────
+async function review() {
+  const { data, error } = await sb.from('photos')
+    .select('id,spot_id,source,needs_attention,mod_scores,mod_provider,created_at,display_name,consent_people,consent_no_kids,person_count,w,h')
+    .eq('status', 'pending_review').order('needs_attention', { ascending: false }).order('created_at').limit(50)
+  if (error) throw error
+  if (!data.length) { $('#list').innerHTML = '<div class="empty">没有待审照片</div>'; return }
+  const names = await spotName(data.map(p => p.spot_id))
+  const urls = await Promise.all(data.map(p => signed('photos-pending', `u/${p.id}/full.jpg`)))
+  $('#list').innerHTML = data.map((p, i) => {
+    const sc = p.mod_scores || {}
+    const top = Object.entries(sc).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${Number(v).toFixed(2)}`).join(' · ')
+    return `<div class="card">
+      <div class="img ${p.needs_attention ? 'blur' : ''}" onclick="this.classList.remove('blur')"><img src="${urls[i]}" alt=""></div>
+      <div class="body">
+        <div class="t">${esc(names[p.spot_id] || p.spot_id)}</div>
+        <div class="sub">${p.source === 'editor' ? 'Kaleap 编辑' : esc(p.display_name || '旅人')} · 上传于 ${ago(p.created_at)} · ${p.w}×${p.h} · ${p.person_count ?? '?'} 人</div>
+        <span class="badge ${p.consent_people ? 'b-grn' : 'b-red'}">${p.consent_people ? '✓' : '✗'} 画面里的人同意</span>
+        <span class="badge ${p.consent_no_kids ? 'b-grn' : 'b-red'}">${p.consent_no_kids ? '✓' : '✗'} 没有可认出的 13 岁以下孩子</span>
+        ${p.needs_attention ? '<span class="badge b-red">机器拿不准 / 被举报</span>' : ''}
+        <div class="sub mono">${esc(p.mod_provider || '没过机器审核')}${top ? ' · ' + esc(top) : ''}</div>
+        <div class="sub">看清楚:有没有能认出的孩子、路人是否明显、是不是这个机位、拍法危不危险。</div>
+        <div class="acts">
+          <button class="ok" data-a="approve" data-id="${p.id}">通过</button>
+          <select data-r="${p.id}">${Object.entries(REJECT).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+          <button class="bad" data-a="reject" data-id="${p.id}">拒绝</button>
+          <button class="danger" data-a="quarantine" data-id="${p.id}" title="疑似儿童性虐待图片:隔离保存 1 年,并向 NCMEC 报告">隔离</button>
+        </div>
+      </div></div>`
+  }).join('')
+  $('#list').querySelectorAll('button[data-a]').forEach(b => b.onclick = () => {
+    const id = b.dataset.id, a = b.dataset.a
+    if (a === 'quarantine' && !confirm('隔离 = 疑似儿童性虐待图片。文件锁存 1 年,你需要去 NCMEC 报告。确定?')) return
+    const note = a === 'reject' ? $(`select[data-r="${id}"]`).value : undefined
+    act(() => admin(a, { photo_id: id, note }), a === 'approve' ? '已通过(用户照片满 24 小时上墙)' : '已处理')
+  })
+}
+
+// ── 举报:带 24 / 48 小时倒计时 ─────────────────────────────────────────
+async function reports() {
+  const { data, error } = await sb.from('reports').select('target_type,target_id,reason,note,created_at,reporter_signed_in')
+    .eq('state', 'open').order('created_at').limit(300)
+  if (error) throw error
+  if (!data.length) { $('#list').innerHTML = '<div class="empty">没有未处理的举报</div>'; return }
+  const by = {}
+  for (const r of data) (by[`${r.target_type}:${r.target_id}`] ||= []).push(r)
+  const photoIds = Object.keys(by).filter(k => k.startsWith('photo:')).map(k => k.slice(6))
+  const { data: photos } = photoIds.length
+    ? await sb.from('photos').select('id,spot_id,status,public_key,source,display_name').in('id', photoIds) : { data: [] }
+  const P = Object.fromEntries((photos || []).map(p => [p.id, p]))
+  const names = await spotName((photos || []).map(p => p.spot_id))
+  const rows = await Promise.all(Object.entries(by).map(async ([k, rs]) => {
+    const type = k.split(':')[0], id = k.slice(k.indexOf(':') + 1)
+    const first = Math.min(...rs.map(r => +new Date(r.created_at)))
+    const fast = rs.some(r => FAST.has(r.reason))
+    const left = (first + (fast ? 48 : 24) * 36e5 - Date.now()) / 36e5
+    const p = P[id]
+    let img = ''
+    if (p) img = p.public_key ? `${PUB}p/${p.public_key}/thumb.jpg` : await signed('photos-pending', `u/${p.id}/full.jpg`)
+    return `<div class="card">
+      ${type === 'photo' ? `<div class="img blur" onclick="this.classList.remove('blur')"><img src="${img}" alt=""></div>` : ''}
+      <div class="body">
+        <div class="t">${type === 'photo' ? esc(names[p?.spot_id] || '照片') : '机位 ' + esc(id.slice(0, 8))}</div>
+        <div class="sub">${rs.length} 人举报 · ${[...new Set(rs.map(r => REASON[r.reason] || r.reason))].join('、')} · 当前状态 ${esc(p?.status || '—')}</div>
+        <span class="badge ${left < 6 ? 'b-red' : 'b-amb'}">${left > 0 ? `还剩 ${left.toFixed(1)} 小时` : `已超时 ${(-left).toFixed(1)} 小时`}(${fast ? '私密影像 48h' : '24h'})</span>
+        ${rs.filter(r => r.note).map(r => `<div class="sub">「${esc(r.note)}」</div>`).join('')}
+        ${type === 'photo' ? `<div class="acts">
+          <button class="ok" data-a="restore" data-id="${id}" title="审过仍保留:之后的匿名举报不再自动下架">恢复</button>
+          <button class="bad" data-a="delete" data-id="${id}">删除</button>
+          ${p?.source === 'user' ? `<button class="bad" data-a="ban" data-id="${id}">删除并封号</button>` : ''}
+          <button class="danger" data-a="quarantine" data-id="${id}">隔离</button>
+          <button data-a="dismiss_reports" data-id="${id}">驳回举报</button>
+        </div>` : '<div class="sub">机位举报:去「机位」里改提示或下架。</div>'}
+      </div></div>`
+  }))
+  $('#list').innerHTML = rows.join('')
+  $('#list').querySelectorAll('button[data-a]').forEach(b => b.onclick = () => {
+    const a = b.dataset.a
+    if ((a === 'delete' || a === 'ban') && !confirm(a === 'ban' ? '删掉这张并封掉作者?' : '删掉这张?不能恢复。')) return
+    if (a === 'quarantine' && !confirm('隔离 = 疑似儿童性虐待图片。文件锁存 1 年,你需要去 NCMEC 报告。确定?')) return
+    act(() => admin(a, { photo_id: b.dataset.id }), '已处理')
+  })
+}
+
+// ── 机位 ──────────────────────────────────────────────────────────────
+let editing = null
+async function spots() {
+  const [{ data: list, error }, { data: cs }] = await Promise.all([
+    sb.from('spots').select('*').neq('status', 'retired').order('status').order('city_code').order('editor_order', { nullsFirst: false }),
+    sb.from('cities').select('code,name,name_zh').order('sort'),
+  ])
+  if (error) throw error
+  if (editing) return spotEditor(editing === 'new' ? {} : (list.find(s => s.id === editing) || {}), cs || [])
+  $('#list').innerHTML = `<div class="bar"><span class="muted">草稿要补:中英文名、城市、拍摄提示、安全档(必选),再发布。</span>
+    <button class="p" id="newSpot">新建机位</button></div>
+    <table class="tbl"><tr><th>机位</th><th>城市</th><th>安全档</th><th>状态</th><th></th></tr>
+    ${list.map(s => `<tr><td>${esc(s.name_zh || s.name)}<div class="muted mono">${s.lat?.toFixed(5)}, ${s.lng?.toFixed(5)} · ${s.radius_m}m</div></td>
+      <td>${esc(s.city_code || '—')}</td>
+      <td>${s.safety === 'ok' ? '正常' : s.safety === 'caution' ? '<span class="badge b-amb">注意</span>' : '<span class="need">未选</span>'}</td>
+      <td>${s.status === 'published' ? '<span class="badge b-grn">已发布</span>' : `<span class="badge">${s.status}</span>`}</td>
+      <td><button data-e="${s.id}">编辑</button></td></tr>`).join('')}</table>`
+  $('#newSpot').onclick = () => { editing = 'new'; render() }
+  $('#list').querySelectorAll('button[data-e]').forEach(b => b.onclick = () => { editing = b.dataset.e; render() })
+}
+
+async function spotEditor(s, cs) {
+  const f = (k, label, type = 'text', extra = '') =>
+    `<label>${label}</label><input name="${k}" type="${type}" value="${esc(s[k] ?? '')}" ${extra}>`
+  const ta = (k, label) => `<label>${label}</label><textarea name="${k}">${esc(s[k] ?? '')}</textarea>`
+  $('#list').innerHTML = `<div class="bar"><button id="back">‹ 返回</button><b>${esc(s.name_zh || s.name || '新机位')}</b></div>
+    <form class="ed" id="ed">
+      ${f('name', '英文名 *')}${f('name_zh', '中文名')}${f('landmark', '地标(英)')}${f('landmark_zh', '地标(中)')}
+      <label>城市 *</label><select name="city_code" id="citySel"><option value="">—</option>${cs.map(c => `<option value="${c.code}" ${c.code === s.city_code ? 'selected' : ''}>${esc(c.name_zh || c.name)}</option>`).join('')}<option value="__new">+ 新建城市…</option></select>
+      ${f('lat', '站位纬度 *', 'number', 'step="0.000001"')}${f('lng', '站位经度 *', 'number', 'step="0.000001"')}
+      <label></label><div class="acts" style="margin-top:0"><button type="button" id="hereBtn">📍 用我现在的位置</button>
+        <span class="muted" id="hereMsg" style="font-size:12px">站在拍照的位置上点;或者下面选照片,照片里带 GPS 的会自动填</span></div>
+      ${f('radius_m', '半径(米,15–500)', 'number', 'min="15" max="500"')}${f('heading_deg', '镜头朝向(度)', 'number', 'min="0" max="359"')}
+      <label class="need">安全档 *</label><select name="safety"><option value="">— 必选,没有默认值 —</option>
+        <option value="ok" ${s.safety === 'ok' ? 'selected' : ''}>正常</option>
+        <option value="caution" ${s.safety === 'caution' ? 'selected' : ''}>注意(加一行提醒,去掉跳、抬、踢类姿势)</option></select>
+      <label></label><div class="muted" style="font-size:12px">栏杆外、无护栏崖边、水里、铁轨车道、私宅这类地方:不建。</div>
+      ${ta('shot_tip', '拍摄提示(英)')}${ta('shot_tip_zh', '拍摄提示(中)')}
+      ${f('best_time', '最佳时段(英)')}${f('best_time_zh', '最佳时段(中)')}
+      ${ta('safety_note', '安全提示(英)')}${ta('safety_note_zh', '安全提示(中)')}
+      <label>推荐姿势 id</label><input name="pose_ids" value="${esc((s.pose_ids || []).join(', '))}" placeholder="逗号分隔">
+      ${f('editor_order', '城市内排序', 'number')}
+      <label>状态</label><select name="status">${['draft', 'published', 'hidden', 'retired'].map(v => `<option ${v === (s.status || 'draft') ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <label></label><div class="acts"><button class="p" type="submit">保存</button></div>
+    </form>
+    <h3 style="margin-top:22px">添加照片</h3>
+    <div class="card" style="display:block">
+      <input type="file" id="pick" accept="image/*" multiple>
+      <div class="sub" style="margin-top:6px">在浏览器里转正、缩到长边 1440、<b>删光位置和拍摄信息</b>后再上传;你的照片直接公开(不进人工队列)。
+        HEIC 在 Chrome 里读不了:用 Safari,或从「照片」导出时选 JPEG。${s.id ? '' : '<br><b>新机位:先选照片(会自动填位置),填好名字后点「保存」一起上传。</b>'}</div>
+      <div id="upq" style="margin-top:8px"></div>
+    </div>
+    <h3 style="margin-top:22px">这个机位的照片</h3><div class="muted" style="font-size:12px;margin-bottom:8px">前 3 = 有效赞多的在前;同赞时按这里的顺序(↑↓ 调)。编辑不能置顶。「不进推荐」= 留在详情页,不进前 3。</div>
+    <div class="grid" id="phs"></div>`
+  $('#back').onclick = () => { editing = null; render() }
+  $('#ed').onsubmit = async e => {
+    e.preventDefault()
+    const fd = Object.fromEntries(new FormData(e.target))
+    const num = k => fd[k] === '' ? null : Number(fd[k])
+    const row = {
+      name: fd.name, name_zh: fd.name_zh || null, landmark: fd.landmark || null, landmark_zh: fd.landmark_zh || null,
+      city_code: fd.city_code || null, lat: num('lat'), lng: num('lng'), radius_m: num('radius_m') ?? 50,
+      heading_deg: num('heading_deg'), safety: fd.safety || null,
+      shot_tip: fd.shot_tip || null, shot_tip_zh: fd.shot_tip_zh || null, best_time: fd.best_time || null, best_time_zh: fd.best_time_zh || null,
+      safety_note: fd.safety_note || null, safety_note_zh: fd.safety_note_zh || null,
+      pose_ids: fd.pose_ids ? fd.pose_ids.split(',').map(x => x.trim()).filter(Boolean) : [],
+      editor_order: num('editor_order'), status: fd.status, updated_at: new Date().toISOString(),
+    }
+    if (!row.name || row.lat == null || row.lng == null) { toast('英文名和站位经纬度必填'); return }
+    if (row.status === 'published' && (!row.city_code || !row.safety)) { toast('发布前要选城市和安全档'); return }
+    if (row.safety === 'caution' && !row.safety_note) { toast('「注意」档要写安全提示'); return }
+    const q = editing === 'new' ? sb.from('spots').insert(row).select() : sb.from('spots').update(row).eq('id', editing).select()
+    const { data, error } = await q
+    if (error) { toast('保存失败:' + error.message); return }
+    editing = data[0].id
+    if (queued.length) {
+      toast('已保存,开始上传照片…')
+      await uploadPhotos(editing, queued, 0)
+      queued = []
+    }
+    try { await admin('rebuild') } catch {}
+    toast(row.status === 'published' ? '已保存并发布 —— 用户走到这里就会看到' : '已保存(还是草稿,改成 published 才会推荐给用户)')
+    render()
+  }
+  let queued = []
+  $('#citySel').onchange = async e => {
+    if (e.target.value !== '__new') return
+    const name = prompt('城市英文名(如 New York)'); if (!name) { e.target.value = ''; return }
+    const name_zh = prompt('城市中文名(如 纽约)') || null
+    const code = (prompt('城市代码,英文小写(如 nyc)', name.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8)) || '').trim()
+    const country = (prompt('国家代码(美国 US、韩国 KR、日本 JP)', 'US') || 'US').trim().toUpperCase()
+    if (!code) { e.target.value = ''; return }
+    const { error } = await sb.from('cities').upsert({ code, name, name_zh, country })
+    if (error) { toast('建城市失败:' + error.message); e.target.value = ''; return }
+    const o = document.createElement('option'); o.value = code; o.textContent = name_zh || name
+    e.target.insertBefore(o, e.target.lastElementChild); e.target.value = code
+    toast('城市已建')
+  }
+  $('#hereBtn').onclick = () => {
+    if (!navigator.geolocation) { toast('这个浏览器拿不到位置'); return }
+    $('#hereMsg').textContent = '定位中…'
+    navigator.geolocation.getCurrentPosition(p => {
+      $('#ed').lat.value = p.coords.latitude.toFixed(6)
+      $('#ed').lng.value = p.coords.longitude.toFixed(6)
+      $('#hereMsg').textContent = `已填入(误差约 ${Math.round(p.coords.accuracy)} 米${p.coords.accuracy > 30 ? ',偏大:到开阔处再点一次' : ''})`
+    }, err => { $('#hereMsg').textContent = '没拿到位置:' + err.message + '(要在 https 网址或本机打开,并允许定位)' },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })
+  }
+  $('#pick').onchange = async e => {
+    const files = [...e.target.files]; e.target.value = ''
+    if (!files.length) return
+    // 位置空着 → 用第一张带 GPS 的照片填(拍的人站的位置)
+    const ed = $('#ed')
+    if (!ed.lat.value || !ed.lng.value) {
+      for (const f of files) {
+        const m = await readExif(f)
+        if (m.lat != null) {
+          ed.lat.value = m.lat.toFixed(6); ed.lng.value = m.lng.toFixed(6)
+          if (m.heading != null && !ed.heading_deg.value) ed.heading_deg.value = Math.round(m.heading) % 360
+          $('#hereMsg').textContent = `已用照片「${f.name}」里的位置`
+          break
+        }
+      }
+    }
+    if (!s.id) {
+      queued.push(...files)
+      $('#upq').innerHTML = queued.map(f => `<div class="sub">⏳ ${esc(f.name)} —— 保存后上传</div>`).join('')
+      return
+    }
+    const { count } = await sb.from('photos').select('id', { count: 'exact', head: true }).eq('spot_id', s.id)
+    await uploadPhotos(s.id, files, count || 0)
+    try { await admin('rebuild') } catch {}
+    render()
+  }
+  if (!s.id) return
+  const { data: ph } = await sb.from('photos').select('id,status,public_key,source,like_count,no_recommend,editor_order,display_name,likes_frozen')
+    .eq('spot_id', s.id).in('status', ['approved', 'pending_review', 'hidden']).order('editor_order', { nullsFirst: false }).order('created_at')
+  const list = ph || []
+  $('#phs').innerHTML = list.map((p, i) => `<div class="ph">
+      <img src="${p.public_key ? `${PUB}p/${p.public_key}/thumb.jpg` : ''}" alt="">
+      <div class="m"><div>${p.source === 'editor' ? '编辑' : esc(p.display_name || '用户')} · ♡${p.like_count}${p.likes_frozen ? ' <span class="need">赞已冻结</span>' : ''}</div>
+        <div class="muted">${p.status}${p.no_recommend ? ' · 不进推荐' : ''}</div>
+        <div class="row"><button data-o="${i}" data-d="-1">↑</button><button data-o="${i}" data-d="1">↓</button>
+          <button data-nr="${p.id}" data-on="${!p.no_recommend}">${p.no_recommend ? '进推荐' : '不进推荐'}</button>
+          ${p.likes_frozen ? `<button data-uf="${p.id}">解冻赞</button>` : ''}
+          ${p.status === 'approved' ? `<button class="bad" data-h="${p.id}">下架</button>` : ''}</div></div></div>`).join('') || '<div class="muted">还没有照片 —— 用 Mac 入库脚本传。</div>'
+  $('#phs').querySelectorAll('button[data-o]').forEach(b => b.onclick = () => {
+    const i = +b.dataset.o, j = i + +b.dataset.d
+    if (j < 0 || j >= list.length) return
+    const ids = list.map(p => p.id); [ids[i], ids[j]] = [ids[j], ids[i]]
+    act(() => admin('order', { photo_ids: ids }), '顺序已改')
+  })
+  $('#phs').querySelectorAll('button[data-nr]').forEach(b => b.onclick = () => act(() => admin('no_recommend', { photo_id: b.dataset.nr, on: b.dataset.on === 'true' }), '已改'))
+  $('#phs').querySelectorAll('button[data-uf]').forEach(b => b.onclick = () => act(() => admin('unfreeze_likes', { photo_id: b.dataset.uf }), '已解冻'))
+  $('#phs').querySelectorAll('button[data-h]').forEach(b => b.onclick = () => confirm('下架这张?') && act(() => admin('hide', { photo_id: b.dataset.h }), '已下架'))
+}
+
+// ── 照片上传:浏览器里转正、缩图、删元数据(画到 canvas 再导出,EXIF 一个字节都带不过去)──
+async function readExif(file) {
+  const out = { lat: null, lng: null, heading: null, taken: null }
+  try {
+    const b = new DataView(await file.slice(0, 256 * 1024).arrayBuffer())
+    if (b.getUint16(0) !== 0xFFD8) return out
+    let i = 2
+    while (i + 4 < b.byteLength) {
+      const m = b.getUint16(i), len = b.getUint16(i + 2)
+      if (m === 0xFFE1 && b.getUint32(i + 4) === 0x45786966) {            // 'Exif'
+        const t = i + 10, le = b.getUint16(t) === 0x4949
+        const u16 = o => b.getUint16(t + o, le), u32 = o => b.getUint32(t + o, le)
+        const rat = o => u32(o) / (u32(o + 4) || 1)
+        const ifd = o => { const n = u16(o), e = {}; for (let k = 0; k < n; k++) { const p = o + 2 + k * 12; e[u16(p)] = p } return e }
+        const ascii = (p) => { const c = u32(p + 4), off = c > 4 ? u32(p + 8) : p + 8; let r = ''; for (let k = 0; k < c - 1; k++) r += String.fromCharCode(b.getUint8(t + off + k)); return r }
+        const ifd0 = ifd(u32(4))
+        if (ifd0[0x8769]) { const ex = ifd(u32(ifd0[0x8769] + 8)); if (ex[0x9003]) {
+          const v = ascii(ex[0x9003]).match(/(\d+):(\d+):(\d+) (\d+):(\d+)/)
+          if (v) out.taken = new Date(+v[1], +v[2] - 1, +v[3], +v[4], +v[5]) } }
+        if (ifd0[0x8825]) {
+          const g = ifd(u32(ifd0[0x8825] + 8))
+          const dms = p => { const o = u32(p + 8); return rat(o) + rat(o + 8) / 60 + rat(o + 16) / 3600 }
+          if (g[2] && g[4]) {
+            out.lat = dms(g[2]) * (g[1] && ascii(g[1]) === 'S' ? -1 : 1)
+            out.lng = dms(g[4]) * (g[3] && ascii(g[3]) === 'W' ? -1 : 1)
+          }
+          if (g[17]) out.heading = rat(u32(g[17] + 8))
+        }
+        break
+      }
+      if ((m & 0xFF00) !== 0xFF00 || m === 0xFFDA) break
+      i += 2 + len
+    }
+  } catch {}
+  return out
+}
+function daypart(t) {
+  const h = t.getHours() + t.getMinutes() / 60
+  return h >= 5 && h < 7 ? 'dawn' : h < 11 && h >= 7 ? 'morning' : h < 14 && h >= 11 ? 'noon'
+    : h < 17 && h >= 14 ? 'afternoon' : h < 19.5 && h >= 17 ? 'golden' : h < 20.5 && h >= 19.5 ? 'blue' : 'night'
+}
+async function toJpeg(bmp, max, q) {
+  const k = Math.min(1, max / Math.max(bmp.width, bmp.height))
+  const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k)
+  const c = document.createElement('canvas'); c.width = w; c.height = h
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(bmp, 0, 0, w, h)
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', q))
+  return { blob, w, h }
+}
+async function uploadPhotos(spotId, files, startOrder) {
+  const box = $('#upq')
+  box.innerHTML = files.map((f, i) => `<div class="sub" id="uq${i}">⏳ ${esc(f.name)}</div>`).join('')
+  const set = (i, t) => { const el = document.getElementById('uq' + i); if (el) el.textContent = `${t} ${files[i].name}` }
+  for (let i = 0; i < files.length; i++) {
+    try {
+      set(i, '处理中…')
+      const meta = await readExif(files[i])
+      let bmp
+      try { bmp = await createImageBitmap(files[i], { imageOrientation: 'from-image' }) }
+      catch { throw new Error('浏览器读不了这张(HEIC?换 Safari 或导出成 JPEG)') }
+      const full = await toJpeg(bmp, 1440, 0.88), thumb = await toJpeg(bmp, 480, 0.72)
+      const t = meta.taken
+      const r = await admin('editor_create', {
+        spot_id: spotId, w: full.w, h: full.h, tw: thumb.w, th: thumb.h,
+        daypart: t ? daypart(t) : null,
+        taken_month: t ? `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}` : null,
+        editor_order: startOrder + i,
+      })
+      set(i, '上传中…')
+      for (const [sig, blob] of [[r.full, full.blob], [r.thumb, thumb.blob]]) {
+        const { error } = await sb.storage.from(r.bucket).uploadToSignedUrl(sig.path, sig.token, blob, { contentType: 'image/jpeg', upsert: true })
+        if (error) throw error
+      }
+      const fin = await admin('editor_finalize', { photo_id: r.photo_id })
+      set(i, fin.status === 'approved' ? '✓ 已公开' : fin.status === 'rejected' ? '✗ 文件没通过检查' : '· 进了审核队列(机器拿不准)')
+    } catch (e) { set(i, '✗ ' + e.message) }
+  }
+}
+
+// ── 城市 ──────────────────────────────────────────────────────────────
+async function cities() {
+  const { data, error } = await sb.from('cities').select('*').order('sort')
+  if (error) throw error
+  $('#list').innerHTML = `<table class="tbl"><tr><th>代码</th><th>英文</th><th>中文</th><th>国家</th><th>排序</th></tr>
+    ${data.map(c => `<tr><td class="mono">${esc(c.code)}</td><td>${esc(c.name)}</td><td>${esc(c.name_zh)}</td><td>${esc(c.country)}</td><td>${c.sort}</td></tr>`).join('')}</table>
+    <h3>加一座城</h3><form class="ed" id="cf">
+      <label>代码 *</label><input name="code" placeholder="nyc">
+      <label>英文名 *</label><input name="name" placeholder="New York">
+      <label>中文名</label><input name="name_zh" placeholder="纽约">
+      <label>国家 *</label><input name="country" value="US">
+      <label>纬度 / 经度</label><input name="ll" placeholder="40.7128, -74.0060">
+      <label>排序</label><input name="sort" type="number" value="100">
+      <label></label><div><button class="p" type="submit">保存</button></div></form>`
+  $('#cf').onsubmit = async e => {
+    e.preventDefault()
+    const fd = Object.fromEntries(new FormData(e.target))
+    const [lat, lng] = (fd.ll || '').split(',').map(x => Number(x.trim()))
+    const { error } = await sb.from('cities').upsert({ code: fd.code.trim(), name: fd.name.trim(), name_zh: fd.name_zh || null,
+      country: fd.country.trim().toUpperCase(), lat: isFinite(lat) ? lat : null, lng: isFinite(lng) ? lng : null, sort: Number(fd.sort) || 100 })
+    if (error) toast('失败:' + error.message); else { toast('已保存'); render() }
+  }
+}
+
+// ── 免登录下架申请 ─────────────────────────────────────────────────────
+async function takedown() {
+  const { data, error } = await sb.from('takedown_requests').select('*').order('created_at', { ascending: false }).limit(100)
+  if (error) throw error
+  $('#list').innerHTML = data.length ? `<table class="tbl"><tr><th>时间</th><th>理由</th><th>链接 / 描述</th><th>联系方式</th><th>匹配到照片</th></tr>
+    ${data.map(r => `<tr><td>${ago(r.created_at)}</td><td>${esc(REASON[r.reason] || r.reason)}</td><td><div class="mono">${esc(r.url)}</div>${esc(r.details)}</td>
+      <td>${esc(r.contact)}</td><td>${r.photo_id ? '是(已先藏起,去「举报」处理)' : '<span class="need">否 —— 手动找</span>'}</td></tr>`).join('')}</table>`
+    : '<div class="empty">没有下架申请</div>'
+}
+
+// ── 服务器端开关 ───────────────────────────────────────────────────────
+async function config() {
+  const { data, error } = await sb.from('app_config').select('*').order('key')
+  if (error) throw error
+  const LABEL = { like_requires_signin: '点赞要 Apple 登录(发现刷赞时打开)', user_publish_delay_hours: '用户照片上传后几小时才上墙',
+    like_count_after_hours: '新号的赞几小时后计入', like_spike_per_hour: '一小时内赞超过多少就冻结', likes_per_hour: '每人每小时最多赞',
+    likes_per_day: '每人每天最多赞', user_uploads_per_day: '每人每天最多发', user_uploads_per_spot_day: '每人每机位每天最多发' }
+  $('#list').innerHTML = `<table class="tbl"><tr><th>开关</th><th>值</th><th></th></tr>${data.map(r => `<tr>
+    <td>${esc(LABEL[r.key] || r.key)}<div class="muted mono">${esc(r.key)}</div></td>
+    <td><input data-k="${esc(r.key)}" value="${esc(JSON.stringify(r.value))}" style="width:90px;background:#111;color:#fff;border:1px solid var(--line);border-radius:6px;padding:5px"></td>
+    <td><button data-s="${esc(r.key)}">保存</button></td></tr>`).join('')}</table>`
+  $('#list').querySelectorAll('button[data-s]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.s; let v
+    try { v = JSON.parse($(`input[data-k="${k}"]`).value) } catch { toast('值要是 true / false / 数字'); return }
+    const { error } = await sb.from('app_config').update({ value: v }).eq('key', k)
+    toast(error ? '失败:' + error.message : '已保存(手机最多几小时内跟上)')
+  })
+}
+
+async function log() {
+  const { data, error } = await sb.from('admin_log').select('*').order('at', { ascending: false }).limit(200)
+  if (error) throw error
+  $('#list').innerHTML = `<table class="tbl"><tr><th>时间</th><th>操作</th><th>对象</th><th>详情</th></tr>${data.map(r => `<tr>
+    <td>${ago(r.at)}</td><td>${esc(r.action)}</td><td class="mono">${esc((r.target || '').slice(0, 8))}</td><td class="mono">${esc(JSON.stringify(r.detail))}</td></tr>`).join('')}</table>`
+}
+
+async function usage() {
+  const { data: users, error } = await sb.rpc('usage_by_user')
+  if (error) throw error
+  const { data: models } = await sb.rpc('usage_by_model')
+  $('#list').innerHTML = `<h3>按设备(30 天)</h3><table class="tbl"><tr><th>设备</th><th>会话</th><th>云端</th><th>token</th><th>最近</th></tr>
+    ${(users || []).map(u => `<tr><td class="mono">${esc((u.user_id || '').slice(0, 8))}</td><td>${u.sessions}</td><td>${u.cloud_calls}</td><td>${Number(u.tokens).toLocaleString()}</td><td>${u.last_active ? ago(u.last_active) : '—'}</td></tr>`).join('')}</table>
+    <h3>按模型</h3><table class="tbl"><tr><th>模型</th><th>调用</th><th>token</th></tr>${(models || []).map(m => `<tr><td class="mono">${esc(m.model)}</td><td>${m.calls}</td><td>${Number(m.tokens).toLocaleString()}</td></tr>`).join('')}</table>`
+}
+
+boot()
+</script>
+</body>
+</html>
