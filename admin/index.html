@@ -93,6 +93,7 @@
     <h1>Kaleap 打卡管理台</h1>
     <button id="rebuild" title="审核、下架时会自动重建;这里手动再来一次">重建清单</button>
     <span class="who" id="who"></span>
+    <button id="chpw">改密码</button>
     <button id="logout">退出</button>
   </header>
   <div class="tabs" id="tabs"></div>
@@ -122,7 +123,7 @@ const FAST = new Set(['me_private'])   // 私密影像 48 小时;其余 24 小�
 
 const TABS = [
   ['quick', '＋ 快速添加'], ['review', '待审'], ['reports', '举报'], ['spots', '机位'], ['cities', '城市'],
-  ['takedown', '下架申请'], ['config', '开关'], ['log', '操作日志'], ['usage', '用量'],
+  ['takedown', '下架申请'], ['editors', '管理员'], ['config', '开关'], ['log', '操作日志'], ['usage', '用量'],
 ]
 let tab = 'quick'
 
@@ -144,6 +145,11 @@ $('#loginBtn').onclick = async () => {
   boot()
 }
 $('#logout').onclick = async () => { await sb.auth.signOut(); location.reload() }
+// 改密码(登录后任何管理员都能改自己的):复用「设新密码」那一屏(输入框是密码框,不明文)
+$('#chpw').onclick = () => {
+  $('#app').classList.add('hidden'); $('#setpw').classList.remove('hidden')
+  $('#pw1').value = ''; $('#pw2').value = ''; $('#pwErr').textContent = ''
+}
 // 邮件登录链接:不用密码。shouldCreateUser:false —— 只对已有账号发,别人填自己的邮箱也建不了号;
 // 有号但不是编辑,boot() 里 is_admin 那一关照样挡住。
 $('#linkBtn').onclick = async () => {
@@ -178,7 +184,7 @@ $('#pwBtn').onclick = async () => {
   if (a !== b) { $('#pwErr').textContent = '两次不一样'; return }
   const { error } = await sb.auth.updateUser({ password: a })
   if (error) { $('#pwErr').textContent = '没改成:' + error.message; return }
-  $('#setpw').classList.add('hidden'); history.replaceState(null, '', location.pathname); boot()
+  $('#setpw').classList.add('hidden'); history.replaceState(null, '', location.pathname); toast('密码已设好,以后用邮箱 + 这个密码登录'); boot()
 }
 $('#rebuild').onclick = async () => { try { const r = await admin('rebuild'); toast(`清单已重建:${(r.countries||[]).join(', ') || '还没有发布的机位'}`) } catch (e) { toast('失败:' + e.message) } }
 
@@ -205,7 +211,7 @@ async function renderTabs() {
 
 async function render() {
   $('#list').innerHTML = '<div class="empty">加载中…</div>'
-  try { await ({ quick, review, reports, spots, cities, takedown, config, log, usage })[tab]() }
+  try { await ({ quick, review, reports, spots, cities, takedown, editors, config, log, usage })[tab]() }
   catch (e) { $('#list').innerHTML = `<div class="empty">出错:${esc(e.message)}</div>` }
 }
 async function act(fn, ok) { try { await fn(); toast(ok); await renderTabs(); render() } catch (e) { toast('失败:' + e.message) } }
@@ -221,13 +227,14 @@ let quickFix = null
 async function quick() {
   quickFix = null
   $('#list').innerHTML = `
-    <div class="card" style="display:block;max-width:560px">
-      <div class="t" style="font-size:17px">① 拍照或选照片</div>
+    <div class="card" id="qCard" style="display:block;max-width:560px">
+      <div class="t" style="font-size:17px">① 拍照或选照片(电脑上可以直接拖进这个框)</div>
       <input type="file" id="qPick" accept="image/*" multiple style="margin:10px 0">
       <div class="sub" id="qPhotos">可以一次选多张。</div>
       <div class="t" style="font-size:17px;margin-top:18px">② 起个名字</div>
       <input id="qName" placeholder="比如:国贸天桥北口 / Battery Spencer" style="width:100%;padding:11px 12px;margin:8px 0;border-radius:8px;border:1px solid var(--line);background:#111;color:#fff;font-size:16px">
       <div class="sub" id="qLoc">📍 定位中…(站在拍照的位置上)</div>
+      <input id="qCoord" placeholder="在电脑上:粘贴坐标或谷歌 / 苹果地图链接(可选)" style="width:100%;padding:9px 12px;margin:6px 0;border-radius:8px;border:1px solid var(--line);background:#111;color:#fff">
       <div class="t" style="font-size:17px;margin-top:18px">③ 发布</div>
       <div class="acts" style="flex-direction:column;align-items:stretch">
         <button class="p" id="qOk" style="padding:13px;font-size:16px">发布(这里安全)</button>
@@ -246,8 +253,16 @@ async function quick() {
     }, err => { if (!photoFix) $('#qLoc').textContent = '📍 拿不到这台设备的位置(' + err.message + ')—— 选一张带 GPS 的照片也行' },
     { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 })
   } else { $('#qLoc').textContent = '📍 这个浏览器拿不到位置 —— 选一张带 GPS 的照片也行' }
-  $('#qPick').onchange = async e => {
-    files = [...e.target.files]
+  const qCard = $('#qCard')
+  qCard.ondragover = e => { e.preventDefault(); qCard.style.borderColor = 'var(--amber)' }
+  qCard.ondragleave = () => { qCard.style.borderColor = '' }
+  qCard.ondrop = async e => {
+    e.preventDefault(); qCard.style.borderColor = ''
+    await takeQ([...e.dataTransfer.files].filter(x => x.type.startsWith('image/') || /\.(jpe?g|png|heic)$/i.test(x.name)))
+  }
+  $('#qPick').onchange = async e => takeQ([...e.target.files])
+  async function takeQ(fs) {
+    files = fs
     $('#qPhotos').textContent = `已选 ${files.length} 张`
     for (const f of files) {
       const m = await readExif(f)
@@ -258,7 +273,7 @@ async function quick() {
     const name = $('#qName').value.trim()
     if (!files.length) { toast('先拍照或选照片'); return }
     if (!name) { toast('起个名字'); return }
-    const fix = photoFix || quickFix
+    const fix = parseCoord($('#qCoord').value) || photoFix || quickFix
     if (!fix) { toast('还没有位置:等定位,或选一张带 GPS 的照片'); return }
     let note = null
     if (safety === 'caution') {
@@ -291,6 +306,15 @@ async function quick() {
   }
   $('#qOk').onclick = () => go('ok')
   $('#qCaution').onclick = () => go('caution')
+}
+
+// 位置一个格子:「40.7033, -73.9881」,或谷歌地图(…/@40.7,-73.9,17z、?q=40.7,-73.9)、苹果地图(?ll=40.7,-73.9)链接
+function parseCoord(t) {
+  const m = String(t).match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/)
+  if (!m) return null
+  const lat = +m[1], lng = +m[2]
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null
+  return { lat, lng }
 }
 
 // 机位归哪座城:50 公里内已有的城直接用;没有就按位置查城市名(OpenStreetMap,只发机位坐标)并新建
@@ -428,114 +452,132 @@ async function spotEditor(s, cs) {
   const f = (k, label, type = 'text', extra = '') =>
     `<label>${label}</label><input name="${k}" type="${type}" value="${esc(s[k] ?? '')}" ${extra}>`
   const ta = (k, label) => `<label>${label}</label><textarea name="${k}">${esc(s[k] ?? '')}</textarea>`
-  $('#list').innerHTML = `<div class="bar"><button id="back">‹ 返回</button><b>${esc(s.name_zh || s.name || '新机位')}</b></div>
-    <form class="ed" id="ed">
-      ${f('name', '英文名 *')}${f('name_zh', '中文名')}${f('landmark', '地标(英)')}${f('landmark_zh', '地标(中)')}
-      <label>城市 *</label><select name="city_code" id="citySel"><option value="">—</option>${cs.map(c => `<option value="${c.code}" ${c.code === s.city_code ? 'selected' : ''}>${esc(c.name_zh || c.name)}</option>`).join('')}<option value="__new">+ 新建城市…</option></select>
-      ${f('lat', '站位纬度 *', 'number', 'step="0.000001"')}${f('lng', '站位经度 *', 'number', 'step="0.000001"')}
-      <label></label><div class="acts" style="margin-top:0"><button type="button" id="hereBtn">📍 用我现在的位置</button>
-        <span class="muted" id="hereMsg" style="font-size:12px">站在拍照的位置上点;或者下面选照片,照片里带 GPS 的会自动填</span></div>
-      ${f('radius_m', '半径(米,15–500)', 'number', 'min="15" max="500"')}${f('heading_deg', '镜头朝向(度)', 'number', 'min="0" max="359"')}
-      <label class="need">安全档 *</label><select name="safety"><option value="">— 必选,没有默认值 —</option>
-        <option value="ok" ${s.safety === 'ok' ? 'selected' : ''}>正常</option>
-        <option value="caution" ${s.safety === 'caution' ? 'selected' : ''}>注意(加一行提醒,去掉跳、抬、踢类姿势)</option></select>
-      <label></label><div class="muted" style="font-size:12px">栏杆外、无护栏崖边、水里、铁轨车道、私宅这类地方:不建。</div>
-      ${ta('shot_tip', '拍摄提示(英)')}${ta('shot_tip_zh', '拍摄提示(中)')}
-      ${f('best_time', '最佳时段(英)')}${f('best_time_zh', '最佳时段(中)')}
-      ${ta('safety_note', '安全提示(英)')}${ta('safety_note_zh', '安全提示(中)')}
-      <label>推荐姿势 id</label><input name="pose_ids" value="${esc((s.pose_ids || []).join(', '))}" placeholder="逗号分隔">
-      ${f('editor_order', '城市内排序', 'number')}
-      <label>状态</label><select name="status">${['draft', 'published', 'hidden', 'retired'].map(v => `<option ${v === (s.status || 'draft') ? 'selected' : ''}>${v}</option>`).join('')}</select>
-      <label></label><div class="acts"><button class="p" type="submit">保存</button></div>
-    </form>
-    <h3 style="margin-top:22px">添加照片</h3>
-    <div class="card" style="display:block">
-      <input type="file" id="pick" accept="image/*" multiple>
-      <div class="sub" style="margin-top:6px">在浏览器里转正、缩到长边 1440、<b>删光位置和拍摄信息</b>后再上传;你的照片直接公开(不进人工队列)。
-        HEIC 在 Chrome 里读不了:用 Safari,或从「照片」导出时选 JPEG。${s.id ? '' : '<br><b>新机位:先选照片(会自动填位置),填好名字后点「保存」一起上传。</b>'}</div>
+  const coord0 = s.lat != null ? `${(+s.lat).toFixed(6)}, ${(+s.lng).toFixed(6)}` : ''
+  const isNew = !s.id
+  // 只留 4 样:照片、名字、位置、安全。其余收进「更多(可选)」,城市自动归。
+  $('#list').innerHTML = `<div class="bar"><button id="back">‹ 返回</button><b>${esc(s.name_zh || s.name || '新机位')}</b>
+      ${s.status ? `<span class="badge ${s.status === 'published' ? 'b-grn' : ''}">${s.status === 'published' ? '已发布' : s.status === 'draft' ? '草稿' : s.status}</span>` : ''}</div>
+    <div class="card" id="drop" style="display:block">
+      <div class="t">照片</div>
+      <input type="file" id="pick" accept="image/*" multiple style="margin:8px 0">
+      <div class="sub">也可以直接把照片拖到这个框里。照片里带 GPS 的会自动填位置。上传前在浏览器里删光位置和拍摄信息。</div>
       <div id="upq" style="margin-top:8px"></div>
     </div>
+    <form class="ed" id="ed">
+      <label>名字 *</label><input name="nm" value="${esc(s.name_zh || s.name || '')}" placeholder="中文英文都行">
+      <label>位置 *</label><div>
+        <input name="coord" value="${coord0}" placeholder="40.7033, -73.9881 —— 或粘贴谷歌 / 苹果地图链接" style="width:100%">
+        <div class="acts" style="margin-top:6px"><button type="button" id="hereBtn">📍 用我现在的位置</button>
+          <span class="muted" id="hereMsg" style="font-size:12px">站在拍照的位置上点;或选带 GPS 的照片</span></div></div>
+      <label>安全 *</label><div>
+        <label style="color:#fff;margin-right:16px"><input type="radio" name="safety" value="ok" ${s.safety === 'ok' ? 'checked' : ''}> 安全</label>
+        <label style="color:#fff"><input type="radio" name="safety" value="caution" ${s.safety === 'caution' ? 'checked' : ''}> 要注意(崖边、水边、车流旁…)</label>
+        <input name="warn" value="${esc(s.safety_note_zh || s.safety_note || '')}" placeholder="要注意时写一句提醒,比如:崖边没有护栏,别越过矮墙" style="width:100%;margin-top:6px;${s.safety === 'caution' ? '' : 'display:none'}">
+        <div class="muted" style="font-size:12px;margin-top:4px">栏杆外、无护栏崖边、水里、铁轨车道、私宅这类地方:别建。</div></div>
+      <label></label><div class="acts">
+        <button class="p" type="submit" data-st="published">保存并发布</button>
+        <button type="submit" data-st="draft">存为草稿</button>
+        ${s.status === 'published' ? '<button type="submit" class="bad" data-st="hidden">下架这个机位</button>' : ''}</div>
+      <details style="grid-column:1/-1;margin-top:8px"><summary class="muted" style="cursor:pointer">更多(可选):英文名、拍摄提示、最佳时段、城市、半径…</summary>
+        <div class="ed" style="margin-top:10px;border:none;padding:0">
+          ${f('name_en', '英文名(给美国用户)')}${f('landmark_zh', '地标')}
+          ${ta('shot_tip_zh', '拍摄提示')}${f('best_time_zh', '最佳时段')}
+          ${ta('shot_tip', '拍摄提示(英)')}${f('best_time', '最佳时段(英)')}${f('safety_note', '安全提醒(英)')}
+          <label>城市</label><select name="city_code" id="citySel"><option value="">自动</option>${cs.map(c => `<option value="${c.code}" ${c.code === s.city_code ? 'selected' : ''}>${esc(c.name_zh || c.name)}</option>`).join('')}</select>
+          ${f('radius_m', '半径(米,默认 50)', 'number', 'min="15" max="500"')}${f('heading_deg', '镜头朝向(度)', 'number', 'min="0" max="359"')}
+          <label>推荐姿势 id</label><input name="pose_ids" value="${esc((s.pose_ids || []).join(', '))}" placeholder="逗号分隔">
+          ${f('editor_order', '城市内排序', 'number')}
+        </div></details>
+    </form>
     <h3 style="margin-top:22px">这个机位的照片</h3><div class="muted" style="font-size:12px;margin-bottom:8px">前 3 = 有效赞多的在前;同赞时按这里的顺序(↑↓ 调)。编辑不能置顶。「不进推荐」= 留在详情页,不进前 3。</div>
     <div class="grid" id="phs"></div>`
   $('#back').onclick = () => { editing = null; render() }
-  $('#ed').onsubmit = async e => {
+  const ed = $('#ed')
+  ed.querySelectorAll('input[name=safety]').forEach(r => r.onchange = () => {
+    ed.warn.style.display = ed.safety.value === 'caution' ? '' : 'none'
+  })
+  let submitter = 'published'
+  ed.querySelectorAll('button[type=submit]').forEach(b => b.onclick = () => { submitter = b.dataset.st })
+  ed.onsubmit = async e => {
     e.preventDefault()
-    const fd = Object.fromEntries(new FormData(e.target))
-    const num = k => fd[k] === '' ? null : Number(fd[k])
-    const row = {
-      name: fd.name, name_zh: fd.name_zh || null, landmark: fd.landmark || null, landmark_zh: fd.landmark_zh || null,
-      city_code: fd.city_code || null, lat: num('lat'), lng: num('lng'), radius_m: num('radius_m') ?? 50,
-      heading_deg: num('heading_deg'), safety: fd.safety || null,
-      shot_tip: fd.shot_tip || null, shot_tip_zh: fd.shot_tip_zh || null, best_time: fd.best_time || null, best_time_zh: fd.best_time_zh || null,
-      safety_note: fd.safety_note || null, safety_note_zh: fd.safety_note_zh || null,
-      pose_ids: fd.pose_ids ? fd.pose_ids.split(',').map(x => x.trim()).filter(Boolean) : [],
-      editor_order: num('editor_order'), status: fd.status, updated_at: new Date().toISOString(),
-    }
-    if (!row.name || row.lat == null || row.lng == null) { toast('英文名和站位经纬度必填'); return }
-    if (row.status === 'published' && (!row.city_code || !row.safety)) { toast('发布前要选城市和安全档'); return }
-    if (row.safety === 'caution' && !row.safety_note) { toast('「注意」档要写安全提示'); return }
-    const q = editing === 'new' ? sb.from('spots').insert(row).select() : sb.from('spots').update(row).eq('id', editing).select()
-    const { data, error } = await q
-    if (error) { toast('保存失败:' + error.message); return }
-    editing = data[0].id
-    if (queued.length) {
-      toast('已保存,开始上传照片…')
-      await uploadPhotos(editing, queued, 0)
-      queued = []
-    }
-    try { await admin('rebuild') } catch {}
-    toast(row.status === 'published' ? '已保存并发布 —— 用户走到这里就会看到' : '已保存(还是草稿,改成 published 才会推荐给用户)')
-    render()
+    const fd = Object.fromEntries(new FormData(ed))
+    const num = k => fd[k] === '' || fd[k] == null ? null : Number(fd[k])
+    const nm = (fd.nm || '').trim(), cjk = /[一-鿿]/.test(nm)
+    const c = parseCoord(fd.coord || '')
+    if (!nm) { toast('起个名字'); return }
+    if (!c) { toast('位置没填对:用照片 / 我现在的位置 / 粘贴坐标或地图链接'); return }
+    if (submitter === 'published' && !fd.safety) { toast('选一下:安全,还是要注意'); return }
+    const warn = (fd.warn || '').trim()
+    if (fd.safety === 'caution' && !warn) { toast('要注意的话,写一句提醒'); return }
+    const save = $('#ed').querySelector('button[data-st=published]'); save.disabled = true
+    try {
+      const city = fd.city_code || s.city_code || await cityFor(c.lat, c.lng)
+      const nameEn = (fd.name_en || '').trim()
+      const row = {
+        name: nameEn || (cjk ? (s.name && s.name !== s.name_zh ? s.name : nm) : nm),
+        name_zh: cjk ? nm : (s.name_zh || null),
+        landmark_zh: fd.landmark_zh || null,
+        city_code: city, lat: +c.lat.toFixed(6), lng: +c.lng.toFixed(6),
+        radius_m: num('radius_m') ?? 50, heading_deg: num('heading_deg') ?? c.heading ?? null,
+        safety: fd.safety || null,
+        safety_note_zh: fd.safety === 'caution' && /[一-鿿]/.test(warn) ? warn : null,
+        safety_note: fd.safety === 'caution' ? (fd.safety_note || (!/[一-鿿]/.test(warn) ? warn : null)) : null,
+        shot_tip: fd.shot_tip || null, shot_tip_zh: fd.shot_tip_zh || null,
+        best_time: fd.best_time || null, best_time_zh: fd.best_time_zh || null,
+        pose_ids: fd.pose_ids ? fd.pose_ids.split(',').map(x => x.trim()).filter(Boolean) : [],
+        editor_order: num('editor_order'), status: submitter, updated_at: new Date().toISOString(),
+      }
+      const q = isNew ? sb.from('spots').insert(row).select() : sb.from('spots').update(row).eq('id', editing).select()
+      const { data, error } = await q
+      if (error) throw error
+      editing = data[0].id
+      if (queued.length) { toast('已保存,开始上传照片…'); await uploadPhotos(editing, queued, 0); queued = [] }
+      try { await admin('rebuild') } catch {}
+      toast(row.status === 'published' ? '已发布 —— 用户 1 公里内会看到,50 米内照片自动滑出'
+        : row.status === 'hidden' ? '已下架' : '已存为草稿(还不会推荐给用户)')
+      render()
+    } catch (err) { toast('没保存成:' + (err.message || err)); save.disabled = false }
   }
   let queued = []
-  $('#citySel').onchange = async e => {
-    if (e.target.value !== '__new') return
-    const name = prompt('城市英文名(如 New York)'); if (!name) { e.target.value = ''; return }
-    const name_zh = prompt('城市中文名(如 纽约)') || null
-    const code = (prompt('城市代码,英文小写(如 nyc)', name.toLowerCase().replace(/[^a-z]/g, '').slice(0, 8)) || '').trim()
-    const country = (prompt('国家代码(美国 US、韩国 KR、日本 JP)', 'US') || 'US').trim().toUpperCase()
-    if (!code) { e.target.value = ''; return }
-    const { error } = await sb.from('cities').upsert({ code, name, name_zh, country })
-    if (error) { toast('建城市失败:' + error.message); e.target.value = ''; return }
-    const o = document.createElement('option'); o.value = code; o.textContent = name_zh || name
-    e.target.insertBefore(o, e.target.lastElementChild); e.target.value = code
-    toast('城市已建')
-  }
   $('#hereBtn').onclick = () => {
     if (!navigator.geolocation) { toast('这个浏览器拿不到位置'); return }
     $('#hereMsg').textContent = '定位中…'
     navigator.geolocation.getCurrentPosition(p => {
-      $('#ed').lat.value = p.coords.latitude.toFixed(6)
-      $('#ed').lng.value = p.coords.longitude.toFixed(6)
-      $('#hereMsg').textContent = `已填入(误差约 ${Math.round(p.coords.accuracy)} 米${p.coords.accuracy > 30 ? ',偏大:到开阔处再点一次' : ''})`
-    }, err => { $('#hereMsg').textContent = '没拿到位置:' + err.message + '(要在 https 网址或本机打开,并允许定位)' },
+      ed.coord.value = `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)}`
+      $('#hereMsg').textContent = `已填入(误差约 ${Math.round(p.coords.accuracy)} 米${p.coords.accuracy > 30 ? ',偏大:电脑定位不准,建议用照片或粘贴坐标' : ''})`
+    }, err => { $('#hereMsg').textContent = '没拿到位置:' + err.message },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })
   }
-  $('#pick').onchange = async e => {
-    const files = [...e.target.files]; e.target.value = ''
+  const takeFiles = async files => {
     if (!files.length) return
-    // 位置空着 → 用第一张带 GPS 的照片填(拍的人站的位置)
-    const ed = $('#ed')
-    if (!ed.lat.value || !ed.lng.value) {
-      for (const f of files) {
-        const m = await readExif(f)
+    if (!parseCoord(ed.coord.value)) {
+      for (const fl of files) {
+        const m = await readExif(fl)
         if (m.lat != null) {
-          ed.lat.value = m.lat.toFixed(6); ed.lng.value = m.lng.toFixed(6)
+          ed.coord.value = `${m.lat.toFixed(6)}, ${m.lng.toFixed(6)}`
           if (m.heading != null && !ed.heading_deg.value) ed.heading_deg.value = Math.round(m.heading) % 360
-          $('#hereMsg').textContent = `已用照片「${f.name}」里的位置`
+          $('#hereMsg').textContent = `已用照片「${fl.name}」里的位置`
           break
         }
       }
     }
-    if (!s.id) {
+    if (isNew) {
       queued.push(...files)
-      $('#upq').innerHTML = queued.map(f => `<div class="sub">⏳ ${esc(f.name)} —— 保存后上传</div>`).join('')
+      $('#upq').innerHTML = queued.map(q => `<div class="sub">⏳ ${esc(q.name)} —— 点「保存并发布」后上传</div>`).join('')
       return
     }
     const { count } = await sb.from('photos').select('id', { count: 'exact', head: true }).eq('spot_id', s.id)
     await uploadPhotos(s.id, files, count || 0)
     try { await admin('rebuild') } catch {}
     render()
+  }
+  $('#pick').onchange = async e => { const fs = [...e.target.files]; e.target.value = ''; await takeFiles(fs) }
+  const drop = $('#drop')
+  drop.ondragover = e => { e.preventDefault(); drop.style.borderColor = 'var(--amber)' }
+  drop.ondragleave = () => { drop.style.borderColor = '' }
+  drop.ondrop = async e => {
+    e.preventDefault(); drop.style.borderColor = ''
+    await takeFiles([...e.dataTransfer.files].filter(x => x.type.startsWith('image/') || /\.(jpe?g|png|heic)$/i.test(x.name)))
   }
   if (!s.id) return
   const { data: ph } = await sb.from('photos').select('id,status,public_key,source,like_count,no_recommend,editor_order,display_name,likes_frozen')
@@ -661,6 +703,51 @@ async function cities() {
       country: fd.country.trim().toUpperCase(), lat: isFinite(lat) ? lat : null, lng: isFinite(lng) ? lng : null, sort: Number(fd.sort) || 100 })
     if (error) toast('失败:' + error.message); else { toast('已保存'); render() }
   }
+}
+
+// ── 管理员:只有所有者(owner)能加、删、给登录链接 ─────────────────────────────
+async function editors() {
+  let list
+  try { list = (await admin('list_editors')).editors || [] }
+  catch (e) {
+    $('#list').innerHTML = `<div class="empty">${e.message === 'owner_only' ? '只有所有者能管理管理员' : '出错:' + esc(e.message)}</div>`
+    return
+  }
+  $('#list').innerHTML = `
+    <div class="card" style="display:block;max-width:640px">
+      <div class="t">加一个管理员</div>
+      <div class="sub">填对方邮箱就行,不用设密码。加好后点他那一行的「生成登录链接」,把链接私下发给他;
+        他点链接进来后,点右上角「改密码」给自己设密码,以后用邮箱 + 密码登录。</div>
+      <div class="acts"><input id="edEmail" type="email" placeholder="对方邮箱" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:#111;color:#fff">
+        <select id="edRole" style="padding:9px;border-radius:8px;background:#111;color:#fff;border:1px solid var(--line)">
+          <option value="editor">编辑(审核、建机位、管照片)</option><option value="owner">所有者(还能管理管理员)</option></select>
+        <button class="p" id="edAdd">加为管理员</button></div>
+      <div class="sub" id="edMsg"></div>
+    </div>
+    <table class="tbl"><tr><th>邮箱</th><th>身份</th><th>最近登录</th><th></th></tr>
+    ${list.map(u => `<tr><td>${esc(u.email)}</td><td>${u.role === 'owner' ? '所有者' : '编辑'}</td>
+      <td class="muted">${u.last_sign_in_at ? ago(u.last_sign_in_at) : '还没登录过'}</td>
+      <td><button data-link="${u.user_id}">生成登录链接</button> <button class="bad" data-rm="${u.user_id}">移除</button></td></tr>`).join('')}</table>
+    <div id="linkBox"></div>`
+  $('#edAdd').onclick = async () => {
+    const email = $('#edEmail').value.trim()
+    if (!email) { $('#edMsg').textContent = '先填邮箱'; return }
+    try { await admin('add_editor', { email, role: $('#edRole').value }); toast('已加为管理员'); render() }
+    catch (e) { $('#edMsg').textContent = '没加成:' + e.message }
+  }
+  $('#list').querySelectorAll('button[data-rm]').forEach(b => b.onclick = () =>
+    confirm('移除这个管理员?他的账号还在,只是进不了后台。') && act(() => admin('remove_editor', { user_id: b.dataset.rm }), '已移除'))
+  $('#list').querySelectorAll('button[data-link]').forEach(b => b.onclick = async () => {
+    try {
+      const { link } = await admin('login_link', { user_id: b.dataset.link, redirect_to: location.origin + location.pathname })
+      $('#linkBox').innerHTML = `<div class="card" style="display:block;margin-top:12px">
+        <div class="t">一次性登录链接(约 1 小时内有效,用过就作废)</div>
+        <textarea readonly style="width:100%;height:70px;margin:8px 0;background:#111;color:#fff;border:1px solid var(--line);border-radius:8px;padding:8px">${esc(link)}</textarea>
+        <div class="acts"><button class="p" id="cpLink">复制</button></div>
+        <div class="sub">私下发给对方(微信、短信都行),别发到群里。对方点开就进后台了,进来后让他点「改密码」。</div></div>`
+      $('#cpLink').onclick = async () => { await navigator.clipboard.writeText(link); toast('已复制') }
+    } catch (e) { toast('没生成:' + e.message) }
+  })
 }
 
 // ── 免登录下架申请 ─────────────────────────────────────────────────────
