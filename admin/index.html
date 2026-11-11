@@ -120,9 +120,13 @@ const REJECT = { wrong_spot:'位置对不上', blurry:'太糊或太暗', child:'
 const REASON = { sexual:'色情裸露', minor:'涉及未成年', me_private:'这是我 / 私密影像', violence:'暴力血腥', harassment:'骚扰冒犯',
   copyright:'版权', spam:'垃圾广告', wrong_spot:'不是这个机位', unsafe_spot:'危险拍法', other:'其他' }
 const FAST = new Set(['me_private'])   // 私密影像 48 小时;其余 24 小时
+// 编辑一句话:只给作者看(手机上按语言翻译预设;自己写的原样显示)
+const ENOTE = { framing:'站位好,构图稳', light:'光很漂亮', angle:'这个角度很少见', scale:'人和景的比例很舒服', story:'很有故事感' }
+// 这个机位还缺(手机上显示「还缺:夜景 · 双人」;有人补上了就从这里拿掉)
+const GAPS = { night:'夜景', sunrise:'日出', golden:'黄金时刻', snow:'雪天', rain:'雨天', autumn:'秋色', bloom:'花季', duo:'双人', group:'多人', vertical:'竖拍', wide:'广角全景' }
 
 const TABS = [
-  ['quick', '＋ 快速添加'], ['review', '待审'], ['reports', '举报'], ['spots', '机位'], ['cities', '城市'],
+  ['quick', '＋ 快速添加'], ['review', '待审'], ['reports', '举报'], ['spots', '机位'], ['themes', '本周题目'], ['cities', '城市'],
   ['takedown', '下架申请'], ['editors', '管理员'], ['config', '开关'], ['log', '操作日志'], ['usage', '用量'],
 ]
 let tab = 'quick'
@@ -206,20 +210,25 @@ async function renderTabs() {
   const n = { review: nr, reports: nrep }
   $('#tabs').innerHTML = TABS.map(([k, l]) =>
     `<button class="tab ${k === tab ? 'on' : ''}" data-t="${k}">${l}${n[k] ? `<span class="n">${n[k]}</span>` : ''}</button>`).join('')
-  $('#tabs').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.t; editing = null; renderTabs(); render() })
+  $('#tabs').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.t; editing = null; editingTheme = null; renderTabs(); render() })
 }
 
 async function render() {
   $('#list').innerHTML = '<div class="empty">加载中…</div>'
-  try { await ({ quick, review, reports, spots, cities, takedown, editors, config, log, usage })[tab]() }
+  try { await ({ quick, review, reports, spots, themes, cities, takedown, editors, config, log, usage })[tab]() }
   catch (e) { $('#list').innerHTML = `<div class="empty">出错:${esc(e.message)}</div>` }
 }
 async function act(fn, ok) { try { await fn(); toast(ok); await renderTabs(); render() } catch (e) { toast('失败:' + e.message) } }
 
 const spotName = async ids => {
   if (!ids.length) return {}
-  const { data } = await sb.from('spots').select('id,name,name_zh').in('id', [...new Set(ids)])
-  return Object.fromEntries((data || []).map(s => [s.id, s.name_zh || s.name]))
+  const { data } = await sb.from('spots').select('id,name,name_zh,kind').in('id', [...new Set(ids)])
+  return Object.fromEntries((data || []).map(s => [s.id, (s.kind === 'theme' ? '【题目】' : '') + (s.name_zh || s.name)]))
+}
+const spotRows = async ids => {
+  if (!ids.length) return {}
+  const { data } = await sb.from('spots').select('id,kind,wanted').in('id', [...new Set(ids)])
+  return Object.fromEntries((data || []).map(s => [s.id, s]))
 }
 
 // ── 快速添加:拍照 → 起个名字 → 发布。其余全自动,不急的信息以后在「机位」里补 ─────────────
@@ -351,8 +360,11 @@ async function review() {
   if (error) throw error
   if (!data.length) { $('#list').innerHTML = '<div class="empty">没有待审照片</div>'; return }
   const names = await spotName(data.map(p => p.spot_id))
+  const rows = await spotRows(data.map(p => p.spot_id))
   const urls = await Promise.all(data.map(p => signed('photos-pending', `u/${p.id}/full.jpg`)))
   $('#list').innerHTML = data.map((p, i) => {
+    const sp = rows[p.spot_id] || {}
+    const gaps = (sp.wanted || []).filter(g => GAPS[g])
     const sc = p.mod_scores || {}
     const top = Object.entries(sc).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${Number(v).toFixed(2)}`).join(' · ')
     return `<div class="card">
@@ -364,7 +376,14 @@ async function review() {
         <span class="badge ${p.consent_no_kids ? 'b-grn' : 'b-red'}">${p.consent_no_kids ? '✓' : '✗'} 没有可认出的 13 岁以下孩子</span>
         ${p.needs_attention ? '<span class="badge b-red">机器拿不准 / 被举报</span>' : ''}
         <div class="sub mono">${esc(p.mod_provider || '没过机器审核')}${top ? ' · ' + esc(top) : ''}</div>
-        <div class="sub">看清楚:有没有能认出的孩子、路人是否明显、是不是这个机位、拍法危不危险。</div>
+        <div class="sub">看清楚:有没有能认出的孩子、路人是否明显、${sp.kind === 'theme' ? '是不是切题、有没有拍到家里门牌窗外这类能认出住处的东西' : '是不是这个机位、拍法危不危险'}。</div>
+        ${p.source === 'user' ? `<div class="acts" style="margin-top:6px">
+          <select data-n="${p.id}" title="编辑一句话:只有作者在「我发的」里看得到"><option value="">编辑一句话(可选,只给作者看)</option>
+            ${Object.entries(ENOTE).map(([k, l]) => `<option value="p:${k}">${l}</option>`).join('')}<option value="__own">自己写…</option></select>
+          <input data-nt="${p.id}" placeholder="自己写一句(120 字内)" style="display:none;flex:1" maxlength="120">
+          <label style="color:#fff;font-size:13px"><input type="checkbox" data-pk="${p.id}"> 编辑精选</label>
+          ${gaps.length ? `<select data-f="${p.id}"><option value="">补上了…(可选)</option>${gaps.map(g => `<option value="${g}">${GAPS[g]}</option>`).join('')}</select>` : ''}
+        </div>` : ''}
         <div class="acts">
           <button class="ok" data-a="approve" data-id="${p.id}">通过</button>
           <select data-r="${p.id}">${Object.entries(REJECT).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
@@ -373,11 +392,20 @@ async function review() {
         </div>
       </div></div>`
   }).join('')
+  $('#list').querySelectorAll('select[data-n]').forEach(sel => sel.onchange = () => {
+    const box = $(`input[data-nt="${sel.dataset.n}"]`); box.style.display = sel.value === '__own' ? '' : 'none'
+  })
   $('#list').querySelectorAll('button[data-a]').forEach(b => b.onclick = () => {
     const id = b.dataset.id, a = b.dataset.a
     if (a === 'quarantine' && !confirm('隔离 = 疑似儿童性虐待图片。文件锁存 1 年,你需要去 NCMEC 报告。确定?')) return
-    const note = a === 'reject' ? $(`select[data-r="${id}"]`).value : undefined
-    act(() => admin(a, { photo_id: id, note }), a === 'approve' ? '已通过(用户照片满 24 小时上墙)' : '已处理')
+    if (a === 'reject') return act(() => admin(a, { photo_id: id, note: $(`select[data-r="${id}"]`).value }), '已处理')
+    if (a !== 'approve') return act(() => admin(a, { photo_id: id }), '已处理')
+    const sel = $(`select[data-n="${id}"]`), own = $(`input[data-nt="${id}"]`)
+    const note = !sel ? undefined : sel.value === '__own' ? (own.value.trim() || undefined) : (sel.value || undefined)
+    const pick = $(`input[data-pk="${id}"]`)?.checked === true
+    const fill = $(`select[data-f="${id}"]`)?.value || undefined
+    const theme = (names[data.find(p => p.id === id)?.spot_id] || '').startsWith('【题目】')
+    act(() => admin('approve', { photo_id: id, note, pick, fill }), theme ? '已通过(题目照片马上公开)' : '已通过(用户照片满 24 小时上墙)')
   })
 }
 
@@ -431,7 +459,7 @@ async function reports() {
 let editing = null
 async function spots() {
   const [{ data: list, error }, { data: cs }] = await Promise.all([
-    sb.from('spots').select('*').neq('status', 'retired').order('status').order('city_code').order('editor_order', { nullsFirst: false }),
+    sb.from('spots').select('*').eq('kind', 'place').neq('status', 'retired').order('status').order('city_code').order('editor_order', { nullsFirst: false }),
     sb.from('cities').select('code,name,name_zh').order('sort'),
   ])
   if (error) throw error
@@ -461,6 +489,7 @@ async function spotEditor(s, cs) {
       <div class="t">照片</div>
       <input type="file" id="pick" accept="image/*" multiple style="margin:8px 0">
       <div class="sub">也可以直接把照片拖到这个框里。照片里带 GPS 的会自动填位置。上传前在浏览器里删光位置和拍摄信息。</div>
+      <input id="credit" placeholder="署名:受邀摄影师的名字(不填 = Kaleap 编辑;先签好书面授权)" maxlength="40" style="width:100%;margin-top:6px">
       <div id="upq" style="margin-top:8px"></div>
     </div>
     <form class="ed" id="ed">
@@ -487,6 +516,10 @@ async function spotEditor(s, cs) {
           ${f('radius_m', '半径(米,默认 50)', 'number', 'min="15" max="500"')}${f('heading_deg', '镜头朝向(度)', 'number', 'min="0" max="359"')}
           <label>推荐姿势 id</label><input name="pose_ids" value="${esc((s.pose_ids || []).join(', '))}" placeholder="逗号分隔">
           ${f('editor_order', '城市内排序', 'number')}
+          ${ta('editor_note_zh', '编辑手记(那天拍的时候的一句实话)')}${ta('editor_note', '编辑手记(英)')}
+          <label>这个机位还缺</label><div>${Object.entries(GAPS).map(([k, l]) =>
+            `<label style="color:#fff;margin-right:10px;font-size:13px"><input type="checkbox" name="gap_${k}" ${(s.wanted || []).includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}
+            <div class="muted" style="font-size:12px">手机上显示「还缺:夜景 · 双人」;审核时勾「补上了」会自动拿掉。</div></div>
         </div></details>
     </form>
     <h3 style="margin-top:22px">这个机位的照片</h3><div class="muted" style="font-size:12px;margin-bottom:8px">前 3 = 有效赞多的在前;同赞时按这里的顺序(↑↓ 调)。编辑不能置顶。「不进推荐」= 留在详情页,不进前 3。</div>
@@ -526,12 +559,14 @@ async function spotEditor(s, cs) {
         best_time: fd.best_time || null, best_time_zh: fd.best_time_zh || null,
         pose_ids: fd.pose_ids ? fd.pose_ids.split(',').map(x => x.trim()).filter(Boolean) : [],
         editor_order: num('editor_order'), status: submitter, updated_at: new Date().toISOString(),
+        editor_note_zh: (fd.editor_note_zh || '').trim() || null, editor_note: (fd.editor_note || '').trim() || null,
+        wanted: Object.keys(GAPS).filter(k => fd['gap_' + k]),
       }
       const q = isNew ? sb.from('spots').insert(row).select() : sb.from('spots').update(row).eq('id', editing).select()
       const { data, error } = await q
       if (error) throw error
       editing = data[0].id
-      if (queued.length) { toast('已保存,开始上传照片…'); await uploadPhotos(editing, queued, 0); queued = [] }
+      if (queued.length) { toast('已保存,开始上传照片…'); await uploadPhotos(editing, queued, 0, $('#credit')?.value); queued = [] }
       try { await admin('rebuild') } catch {}
       toast(row.status === 'published' ? '已发布 —— 用户 1 公里内会看到,50 米内照片自动滑出'
         : row.status === 'hidden' ? '已下架' : '已存为草稿(还不会推荐给用户)')
@@ -567,7 +602,7 @@ async function spotEditor(s, cs) {
       return
     }
     const { count } = await sb.from('photos').select('id', { count: 'exact', head: true }).eq('spot_id', s.id)
-    await uploadPhotos(s.id, files, count || 0)
+    await uploadPhotos(s.id, files, count || 0, $('#credit')?.value)
     try { await admin('rebuild') } catch {}
     render()
   }
@@ -580,14 +615,15 @@ async function spotEditor(s, cs) {
     await takeFiles([...e.dataTransfer.files].filter(x => x.type.startsWith('image/') || /\.(jpe?g|png|heic)$/i.test(x.name)))
   }
   if (!s.id) return
-  const { data: ph } = await sb.from('photos').select('id,status,public_key,source,like_count,no_recommend,editor_order,display_name,likes_frozen')
+  const { data: ph } = await sb.from('photos').select('id,status,public_key,source,like_count,no_recommend,editor_order,display_name,likes_frozen,credit,editor_pick_at,fills')
     .eq('spot_id', s.id).in('status', ['approved', 'pending_review', 'hidden']).order('editor_order', { nullsFirst: false }).order('created_at')
   const list = ph || []
   $('#phs').innerHTML = list.map((p, i) => `<div class="ph">
       <img src="${p.public_key ? `${PUB}p/${p.public_key}/thumb.jpg` : ''}" alt="">
-      <div class="m"><div>${p.source === 'editor' ? '编辑' : esc(p.display_name || '用户')} · ♡${p.like_count}${p.likes_frozen ? ' <span class="need">赞已冻结</span>' : ''}</div>
-        <div class="muted">${p.status}${p.no_recommend ? ' · 不进推荐' : ''}</div>
+      <div class="m"><div>${p.source === 'editor' ? (p.credit ? '受邀 · ' + esc(p.credit) : '编辑') : esc(p.display_name || '用户')} · ♡${p.like_count}${p.likes_frozen ? ' <span class="need">赞已冻结</span>' : ''}</div>
+        <div class="muted">${p.status}${p.no_recommend ? ' · 不进推荐' : ''}${p.editor_pick_at ? ' · 精选' : ''}${p.fills ? ' · 补上了' + (GAPS[p.fills] || p.fills) : ''}</div>
         <div class="row"><button data-o="${i}" data-d="-1">↑</button><button data-o="${i}" data-d="1">↓</button>
+          ${p.status === 'approved' ? `<button data-pk="${p.id}" data-on="${!p.editor_pick_at}">${p.editor_pick_at ? '取消精选' : '精选'}</button>` : ''}
           <button data-nr="${p.id}" data-on="${!p.no_recommend}">${p.no_recommend ? '进推荐' : '不进推荐'}</button>
           ${p.likes_frozen ? `<button data-uf="${p.id}">解冻赞</button>` : ''}
           ${p.status === 'approved' ? `<button class="bad" data-h="${p.id}">下架</button>` : ''}</div></div></div>`).join('') || '<div class="muted">还没有照片 —— 用 Mac 入库脚本传。</div>'
@@ -599,6 +635,7 @@ async function spotEditor(s, cs) {
   })
   $('#phs').querySelectorAll('button[data-nr]').forEach(b => b.onclick = () => act(() => admin('no_recommend', { photo_id: b.dataset.nr, on: b.dataset.on === 'true' }), '已改'))
   $('#phs').querySelectorAll('button[data-uf]').forEach(b => b.onclick = () => act(() => admin('unfreeze_likes', { photo_id: b.dataset.uf }), '已解冻'))
+  $('#phs').querySelectorAll('button[data-pk]').forEach(b => b.onclick = () => act(() => admin('pick', { photo_id: b.dataset.pk, on: b.dataset.on === 'true' }), '已改(社区「编辑精选」一栏)'))
   $('#phs').querySelectorAll('button[data-h]').forEach(b => b.onclick = () => confirm('下架这张?') && act(() => admin('hide', { photo_id: b.dataset.h }), '已下架'))
 }
 
@@ -651,7 +688,7 @@ async function toJpeg(bmp, max, q) {
   const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', q))
   return { blob, w, h }
 }
-async function uploadPhotos(spotId, files, startOrder) {
+async function uploadPhotos(spotId, files, startOrder, credit) {
   const box = $('#upq')
   box.innerHTML = files.map((f, i) => `<div class="sub" id="uq${i}">⏳ ${esc(f.name)}</div>`).join('')
   const set = (i, t) => { const el = document.getElementById('uq' + i); if (el) el.textContent = `${t} ${files[i].name}` }
@@ -669,6 +706,7 @@ async function uploadPhotos(spotId, files, startOrder) {
         daypart: t ? daypart(t) : null,
         taken_month: t ? `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}` : null,
         editor_order: startOrder + i,
+        credit: (credit || '').trim() || null,
       })
       set(i, '上传中…')
       for (const [sig, blob] of [[r.full, full.blob], [r.thumb, thumb.blob]]) {
@@ -679,6 +717,101 @@ async function uploadPhotos(spotId, files, startOrder) {
       set(i, fin.status === 'approved' ? '✓ 已公开' : fin.status === 'rejected' ? '✗ 文件没通过检查' : '· 进了审核队列(机器拿不准)')
     } catch (e) { set(i, '✗ ' + e.message) }
   }
+}
+
+// ── 本周题目:「没有坐标的机位」。发布、审核、点赞、举报全复用照片那一套(11-11)──────────
+let editingTheme = null
+function weekRange() {
+  const d = new Date(), day = (d.getDay() + 6) % 7   // 周一 = 0
+  const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - day)
+  const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6)
+  const f = x => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`
+  return [f(mon), f(sun)]
+}
+async function themes() {
+  const { data: list, error } = await sb.from('spots').select('*').eq('kind', 'theme').neq('status', 'retired')
+    .order('theme_starts', { ascending: false })
+  if (error) throw error
+  if (editingTheme) return themeEditor(editingTheme === 'new' ? {} : (list.find(t => t.id === editingTheme) || {}))
+  const today = new Date().toISOString().slice(0, 10)
+  $('#list').innerHTML = `<div class="bar"><span class="muted">题目照片只收 7 天内用 Kaleap 拍的,不带地点,审核通过马上公开。出题避开「在家拍」和危险拍法,偏向容易拿到同意、在哪都能拍的。</span>
+    <button class="p" id="newTheme">新建题目</button></div>
+    <table class="tbl"><tr><th>题目</th><th>日期</th><th>状态</th><th></th></tr>
+    ${list.map(t => `<tr><td>${esc(t.name_zh || t.name)}<div class="muted">${esc(t.shot_tip_zh || t.shot_tip || '')}</div></td>
+      <td class="mono">${t.theme_starts} → ${t.theme_ends}${t.status === 'published' && t.theme_starts <= today && t.theme_ends >= today ? ' <span class="badge b-grn">进行中</span>' : ''}</td>
+      <td>${t.status === 'published' ? '<span class="badge b-grn">已发布</span>' : `<span class="badge">${esc(t.status)}</span>`}</td>
+      <td><button data-e="${t.id}">编辑</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted">还没有题目</td></tr>'}</table>`
+  $('#newTheme').onclick = () => { editingTheme = 'new'; render() }
+  $('#list').querySelectorAll('button[data-e]').forEach(b => b.onclick = () => { editingTheme = b.dataset.e; render() })
+}
+async function themeEditor(t) {
+  const isNew = !t.id
+  const [d0, d1] = weekRange()
+  const ta = (k, label, ph = '') => `<label>${label}</label><textarea name="${k}" placeholder="${ph}">${esc(t[k] ?? '')}</textarea>`
+  $('#list').innerHTML = `<div class="bar"><button id="back">‹ 返回</button><b>${esc(t.name_zh || t.name || '新题目')}</b>
+      ${t.status ? `<span class="badge ${t.status === 'published' ? 'b-grn' : ''}">${t.status === 'published' ? '已发布' : t.status === 'draft' ? '草稿' : esc(t.status)}</span>` : ''}</div>
+    <form class="ed" id="ted">
+      <label>题目 *</label><input name="name_zh" value="${esc(t.name_zh || '')}" placeholder="窗边光人像">
+      <label>英文 *</label><input name="name" value="${esc(t.name || '')}" placeholder="Window-light portrait">
+      ${ta('shot_tip_zh', '一句说明', '靠近窗户,让光从侧面落在脸上')}${ta('shot_tip', '说明(英)')}
+      ${ta('editor_note_zh', '编辑手记(可选)')}${ta('editor_note', '手记(英)')}
+      <label>开始 *</label><input name="theme_starts" type="date" value="${t.theme_starts || d0}">
+      <label>结束 *</label><input name="theme_ends" type="date" value="${t.theme_ends || d1}">
+      <label></label><div class="acts"><button class="p" type="submit" data-st="published">保存并发布</button>
+        <button type="submit" data-st="draft">存为草稿</button>
+        ${t.status === 'published' ? '<button type="submit" class="bad" data-st="hidden">下架</button>' : ''}</div>
+    </form>
+    ${isNew ? '<div class="muted" style="margin-top:12px">先保存,再传示范照片。</div>' : `
+    <div class="card" id="drop" style="display:block;margin-top:14px"><div class="t">示范照片(编辑 / 受邀摄影师)</div>
+      <input type="file" id="pick" accept="image/*" multiple style="margin:8px 0">
+      <input id="credit" placeholder="署名:受邀摄影师的名字(不填 = Kaleap 编辑;先签好书面授权)" maxlength="40" style="width:100%">
+      <div id="upq" style="margin-top:8px"></div></div>
+    <h3 style="margin-top:22px">这个题目的照片</h3><div class="grid" id="phs"></div>`}`
+  $('#back').onclick = () => { editingTheme = null; render() }
+  const ed = $('#ted')
+  let submitter = 'published'
+  ed.querySelectorAll('button[type=submit]').forEach(b => b.onclick = () => { submitter = b.dataset.st })
+  ed.onsubmit = async e => {
+    e.preventDefault()
+    const fd = Object.fromEntries(new FormData(ed))
+    const v = k => (fd[k] || '').trim() || null
+    if (!v('name_zh') || !v('name')) { toast('中英文题目都要填'); return }
+    if (!fd.theme_starts || !fd.theme_ends || fd.theme_ends < fd.theme_starts) { toast('日期不对:结束要在开始之后'); return }
+    const row = {
+      kind: 'theme', name: v('name'), name_zh: v('name_zh'), shot_tip: v('shot_tip'), shot_tip_zh: v('shot_tip_zh'),
+      editor_note: v('editor_note'), editor_note_zh: v('editor_note_zh'),
+      theme_starts: fd.theme_starts, theme_ends: fd.theme_ends, lat: null, lng: null, city_code: null,
+      status: submitter, updated_at: new Date().toISOString(),
+    }
+    try {
+      const q = isNew ? sb.from('spots').insert(row).select() : sb.from('spots').update(row).eq('id', t.id).select()
+      const { data, error } = await q
+      if (error) throw error
+      editingTheme = data[0].id
+      try { await admin('rebuild') } catch {}
+      toast(row.status === 'published' ? '已发布 —— 手机上「社区」顶上出题目卡(最晚 1 小时)' : row.status === 'hidden' ? '已下架' : '已存为草稿')
+      render()
+    } catch (err) { toast('没保存成:' + (err.message || err)) }
+  }
+  if (isNew) return
+  $('#pick').onchange = async e => {
+    const fs = [...e.target.files]; e.target.value = ''
+    if (!fs.length) return
+    const { count } = await sb.from('photos').select('id', { count: 'exact', head: true }).eq('spot_id', t.id)
+    await uploadPhotos(t.id, fs, count || 0, $('#credit').value)
+    try { await admin('rebuild') } catch {}
+    render()
+  }
+  const { data: ph } = await sb.from('photos').select('id,status,public_key,source,like_count,display_name,credit,editor_pick_at')
+    .eq('spot_id', t.id).in('status', ['approved', 'pending_review', 'hidden']).order('created_at', { ascending: false })
+  $('#phs').innerHTML = (ph || []).map(p => `<div class="ph">
+      <img src="${p.public_key ? `${PUB}p/${p.public_key}/thumb.jpg` : ''}" alt="">
+      <div class="m"><div>${p.source === 'editor' ? (p.credit ? '受邀 · ' + esc(p.credit) : '编辑') : esc(p.display_name || '旅人')} · ♡${p.like_count}</div>
+        <div class="muted">${esc(p.status)}${p.editor_pick_at ? ' · 精选' : ''}</div>
+        <div class="row">${p.status === 'approved' ? `<button data-pk="${p.id}" data-on="${!p.editor_pick_at}">${p.editor_pick_at ? '取消精选' : '精选'}</button>
+          <button class="bad" data-h="${p.id}">下架</button>` : ''}</div></div></div>`).join('') || '<div class="muted">还没有照片</div>'
+  $('#phs').querySelectorAll('button[data-pk]').forEach(b => b.onclick = () => act(() => admin('pick', { photo_id: b.dataset.pk, on: b.dataset.on === 'true' }), '已改'))
+  $('#phs').querySelectorAll('button[data-h]').forEach(b => b.onclick = () => confirm('下架这张?') && act(() => admin('hide', { photo_id: b.dataset.h }), '已下架'))
 }
 
 // ── 城市 ──────────────────────────────────────────────────────────────
